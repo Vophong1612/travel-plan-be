@@ -1,1 +1,1 @@
-# travel-plan-ai
+# travel-plan-be
