@@ -1,0 +1,26 @@
+2025-07-12 03:24:34,339 - asyncio - DEBUG - Using selector: EpollSelector
+2025-07-12 03:24:39,672 - firestore_client - INFO - Firestore client initialized successfully
+2025-07-12 03:24:40,193 - redis_client - INFO - Redis client initialized successfully
+2025-07-12 03:24:40,442 - urllib3.connectionpool - DEBUG - Starting new HTTPS connection (1): oauth2.googleapis.com:443
+2025-07-12 03:24:40,861 - urllib3.connectionpool - DEBUG - https://oauth2.googleapis.com:443 "POST /token HTTP/2.0" 200 978
+2025-07-12 03:24:41,042 - firestore_client - ERROR - Firestore health check failed: 403 Permission denied on resource project travel-planner-dev. [reason: "CONSUMER_INVALID"
+domain: "googleapis.com"
+metadata {
+  key: "service"
+  value: "firestore.googleapis.com"
+}
+metadata {
+  key: "containerInfo"
+  value: "travel-planner-dev"
+}
+metadata {
+  key: "consumer"
+  value: "projects/travel-planner-dev"
+}
+, locale: "en-US"
+message: "Permission denied on resource project travel-planner-dev."
+, links {
+  description: "Google developers console"
+  url: "https://console.developers.google.com"
+}
+]

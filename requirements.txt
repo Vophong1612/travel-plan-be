@@ -1,0 +1,62 @@
+# Core AI and MCP dependencies
+google-generativeai>=0.3.0
+google-cloud-firestore>=2.11.0
+google-cloud-logging>=3.8.0
+redis>=5.0.0
+fastapi>=0.104.0
+uvicorn>=0.24.0
+pydantic>=2.5.0
+python-multipart>=0.0.6
+
+# MCP and tool integrations
+mcp>=1.0.0
+httpx>=0.25.0
+aiohttp>=3.9.0
+requests>=2.31.0
+
+# Weather and mapping
+openmeteo-requests>=1.1.0
+retry-requests>=2.0.0
+numpy>=1.24.0
+googlemaps>=4.10.0
+
+# Flight and accommodation APIs
+amadeus>=8.0.0
+python-booking>=1.0.0
+duffel-api>=1.0.0
+exchangerate-api>=1.0.0
+
+# Database and caching
+firebase-admin>=6.2.0
+redis-py>=5.0.0
+sqlalchemy>=2.0.0
+
+# MongoDB (on-premise alternative to Firestore)
+pymongo>=4.6.0
+motor>=3.3.0
+
+# Authentication and security
+python-jose>=3.3.0
+passlib>=1.7.4
+python-multipart>=0.0.6
+bcrypt>=4.0.0
+
+# Utilities and validation
+python-dateutil>=2.8.0
+pytz>=2023.3
+jsonschema>=4.17.0
+email-validator>=2.0.0
+
+# Testing and development
+pytest>=7.4.0
+pytest-asyncio>=0.21.0
+pytest-mock>=3.11.0
+black>=23.0.0
+flake8>=6.0.0
+mypy>=1.5.0
+
+# Observability and monitoring
+prometheus-client>=0.17.0
+structlog>=23.1.0
+opentelemetry-api>=1.20.0
+opentelemetry-sdk>=1.20.0 
