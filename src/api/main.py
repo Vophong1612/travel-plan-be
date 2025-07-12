@@ -100,9 +100,9 @@ async def chat_with_planner(chat_request: ChatRequest):
     4. Store trip details in database
     5. Return response
     """
+    logger.info(f"CHAT API: Processing request for user {USER_ID} - '{chat_request.message[:50]}...'")
+    
     try:
-        logger.info(f"Chat request from user {USER_ID}: {chat_request.message[:100]}...")
-        
         # Step 1: Call Main AI to classify and extract information
         extracted_info = await _extract_trip_information(chat_request.message)
         
@@ -127,16 +127,18 @@ async def chat_with_planner(chat_request: ChatRequest):
         trip_id = await _store_trip_details(trip_details)
         
         # Step 4: Return response
+        response_message = _generate_response_message(trip_details)
+        
         return ChatResponse(
             success=True,
-            message=_generate_response_message(trip_details),
+            message=response_message,
             trip_id=trip_id,
             extracted_info=extracted_info,
             trip_details=trip_details
         )
         
     except Exception as e:
-        logger.error(f"Error in chat endpoint: {str(e)}")
+        logger.error(f"CHAT API ERROR: {str(e)}")
         return ChatResponse(
             success=False,
             message="I'm sorry, something went wrong. Please try again.",
@@ -158,6 +160,8 @@ async def _extract_trip_information(message: str) -> Optional[Dict[str, Any]]:
     - Budget information
     - Number of travelers
     """
+    logger.info(f"EXTRACT INFO: Processing message '{message[:30]}...'")
+    
     try:
         # Create AI message for information extraction
         ai_message = AgentMessage(
@@ -179,12 +183,14 @@ async def _extract_trip_information(message: str) -> Optional[Dict[str, Any]]:
             return _simple_extraction_fallback(message)
             
     except Exception as e:
-        logger.error(f"Error extracting trip information: {str(e)}")
+        logger.error(f"EXTRACT INFO ERROR: {str(e)}")
         return _simple_extraction_fallback(message)
 
 
 def _simple_extraction_fallback(message: str) -> Optional[Dict[str, Any]]:
     """Simple keyword-based extraction as fallback."""
+    logger.info(f"FALLBACK EXTRACT: Processing message '{message[:30]}...'")
+    
     message_lower = message.lower()
     
     # Extract destinations
@@ -249,6 +255,8 @@ async def _coordinate_ai_agents(extracted_info: Dict[str, Any]) -> Optional[Dict
     - Itinerary Agent: Generate detailed itinerary
     - Critique Agent: Review and improve itinerary
     """
+    logger.info(f"COORDINATE AGENTS: Processing destination '{extracted_info.get('destination', 'unknown')}'")
+    
     try:
         # Step 1: Check if user profile exists, create if needed
         user_profile = await _ensure_user_profile(extracted_info)
@@ -279,12 +287,14 @@ async def _coordinate_ai_agents(extracted_info: Dict[str, Any]) -> Optional[Dict
         return trip_details
         
     except Exception as e:
-        logger.error(f"Error coordinating AI agents: {str(e)}")
+        logger.error(f"COORDINATE AGENTS ERROR: {str(e)}")
         return None
 
 
 async def _ensure_user_profile(extracted_info: Dict[str, Any]) -> Dict[str, Any]:
     """Ensure user profile exists, create if needed."""
+    logger.info(f"ENSURE PROFILE: Checking profile for user {USER_ID}")
+    
     try:
         # Check if profile exists in memory
         existing_profile = agent_registry.get_agent("orchestrator").get_memory(f"user_profile_{USER_ID}", scope="user")
@@ -314,12 +324,14 @@ async def _ensure_user_profile(extracted_info: Dict[str, Any]) -> Dict[str, Any]
         return profile
         
     except Exception as e:
-        logger.error(f"Error ensuring user profile: {str(e)}")
+        logger.error(f"ENSURE PROFILE ERROR: {str(e)}")
         return {"user_id": USER_ID, "preferences": {}, "traveler_info": {"group_size": 1}}
 
 
 async def _generate_itinerary(extracted_info: Dict[str, Any], user_profile: Dict[str, Any]) -> Optional[Dict[str, Any]]:
     """Generate itinerary using Itinerary Agent."""
+    logger.info(f"GENERATE ITINERARY: Creating itinerary for {extracted_info.get('destination', 'unknown')}")
+    
     try:
         # Create message for itinerary generation
         itinerary_message = AgentMessage(
@@ -341,16 +353,18 @@ async def _generate_itinerary(extracted_info: Dict[str, Any], user_profile: Dict
         if response.success:
             return response.data.get("itinerary")
         else:
-            logger.error(f"Itinerary generation failed: {response.error}")
+            logger.error(f"GENERATE ITINERARY ERROR: {response.error}")
             return None
             
     except Exception as e:
-        logger.error(f"Error generating itinerary: {str(e)}")
+        logger.error(f"GENERATE ITINERARY ERROR: {str(e)}")
         return None
 
 
 async def _critique_itinerary(itinerary: Dict[str, Any], user_profile: Dict[str, Any]) -> Dict[str, Any]:
     """Critique and improve itinerary using Critique Agent."""
+    logger.info("CRITIQUE ITINERARY: Reviewing itinerary for improvements")
+    
     try:
         # Create message for critique
         critique_message = AgentMessage(
@@ -375,16 +389,18 @@ async def _critique_itinerary(itinerary: Dict[str, Any], user_profile: Dict[str,
             
             return itinerary
         else:
-            logger.error(f"Critique failed: {response.error}")
+            logger.error(f"CRITIQUE ITINERARY ERROR: {response.error}")
             return itinerary
             
     except Exception as e:
-        logger.error(f"Error critiquing itinerary: {str(e)}")
+        logger.error(f"CRITIQUE ITINERARY ERROR: {str(e)}")
         return itinerary
 
 
 async def _revise_itinerary(itinerary: Dict[str, Any], critique_result: Dict[str, Any]) -> Optional[Dict[str, Any]]:
     """Revise itinerary based on critique feedback."""
+    logger.info("REVISE ITINERARY: Revising itinerary based on critique feedback")
+    
     try:
         # Create revision message
         revision_message = AgentMessage(
@@ -403,16 +419,18 @@ async def _revise_itinerary(itinerary: Dict[str, Any], critique_result: Dict[str
         if response.success:
             return response.data.get("revised_itinerary")
         else:
-            logger.error(f"Itinerary revision failed: {response.error}")
+            logger.error(f"REVISE ITINERARY ERROR: {response.error}")
             return None
             
     except Exception as e:
-        logger.error(f"Error revising itinerary: {str(e)}")
+        logger.error(f"REVISE ITINERARY ERROR: {str(e)}")
         return None
 
 
 async def _store_trip_details(trip_details: Dict[str, Any]) -> str:
     """Store trip details in database."""
+    logger.info(f"STORE TRIP: Storing trip details for destination '{trip_details.get('destination', 'unknown')}'")
+    
     try:
         # Generate trip ID
         trip_id = f"trip_{USER_ID}_{int(datetime.utcnow().timestamp())}"
@@ -422,20 +440,21 @@ async def _store_trip_details(trip_details: Dict[str, Any]) -> str:
         success = await db_manager.save_trip_details(trip_details)
         
         if success:
-            logger.info(f"Trip details stored successfully: {trip_id}")
             return trip_id
         else:
-            logger.error("Failed to store trip details in database")
+            logger.error("STORE TRIP ERROR: Failed to store trip details in database")
             return trip_id  # Return ID even if storage failed
             
     except Exception as e:
-        logger.error(f"Error storing trip details: {str(e)}")
+        logger.error(f"STORE TRIP ERROR: {str(e)}")
         # Return a generated ID even if storage fails
         return f"trip_{USER_ID}_{int(datetime.utcnow().timestamp())}"
 
 
 def _generate_response_message(trip_details: Dict[str, Any]) -> str:
     """Generate user-friendly response message."""
+    logger.info(f"GENERATE RESPONSE: Creating response for destination '{trip_details.get('destination', 'unknown')}'")
+    
     destination = trip_details.get("destination", "your destination")
     duration = trip_details.get("duration_days", 0)
     
