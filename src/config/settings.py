@@ -33,7 +33,7 @@ class Settings(BaseSettings):
     mongodb_uri: Optional[str] = Field(default="mongodb://root:password12345@localhost:32768/?directConnection=true", env="MONGODB_URI")
     
     # Database selection
-    use_mongodb: bool = Field(default=False, env="USE_MONGODB")
+    use_mongodb: bool = Field(default=True, env="USE_MONGODB")
     
     # AI Model Configuration
     gemini_api_key: str = Field(..., env="GEMINI_API_KEY")

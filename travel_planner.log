@@ -180,3 +180,108 @@ message: "Permission denied on resource project travel-planner-dev."
 2025-07-12 12:39:01,498 - pymongo.topology - DEBUG - {"message": "Topology description changed", "topologyId": {"$oid": "6871f47244b29e8c43a94539"}, "previousDescription": "<TopologyDescription id: 6871f47244b29e8c43a94539, topology_type: Unknown, servers: [<ServerDescription ('localhost', 27017) server_type: Unknown, rtt: None, error=AutoReconnect('localhost:27017: [Errno 61] Connection refused (configured timeouts: socketTimeoutMS: 20000.0ms, connectTimeoutMS: 20000.0ms)')>]>", "newDescription": "<TopologyDescription id: 6871f47244b29e8c43a94539, topology_type: Unknown, servers: [<ServerDescription ('localhost', 27017) server_type: Unknown, rtt: None, error=AutoReconnect('localhost:27017: [Errno 61] Connection refused (configured timeouts: socketTimeoutMS: 20000.0ms, connectTimeoutMS: 20000.0ms)')>]>"}
 2025-07-12 12:45:43,282 - mongodb_client - INFO - MongoDB client initialized successfully
 2025-07-12 12:46:13,751 - mongodb_client - ERROR - MongoDB health check failed: Could not reach any servers in [('local-atlas-kangaroo', 27017)]. Replica set is configured with internal hostnames or IPs?, Timeout: 30s, Topology Description: <TopologyDescription id: 6871f6877b2065ed2ae5c5bc, topology_type: ReplicaSetNoPrimary, servers: [<ServerDescription ('local-atlas-kangaroo', 27017) server_type: Unknown, rtt: None, error=AutoReconnect('local-atlas-kangaroo:27017: [Errno 8] nodename nor servname provided, or not known (configured timeouts: socketTimeoutMS: 20000.0ms, connectTimeoutMS: 20000.0ms)')>]>
+2025-07-12 13:52:30,787 - mongodb_client - INFO - MongoDB client initialized successfully
+2025-07-12 13:53:01,225 - mongodb_client - ERROR - MongoDB health check failed: Could not reach any servers in [('local-atlas-kangaroo', 27017)]. Replica set is configured with internal hostnames or IPs?, Timeout: 30s, Topology Description: <TopologyDescription id: 6872062eb559d43a5e71afcb, topology_type: ReplicaSetNoPrimary, servers: [<ServerDescription ('local-atlas-kangaroo', 27017) server_type: Unknown, rtt: None, error=AutoReconnect('local-atlas-kangaroo:27017: [Errno 8] nodename nor servname provided, or not known (configured timeouts: socketTimeoutMS: 20000.0ms, connectTimeoutMS: 20000.0ms)')>]>
+2025-07-12 13:55:28,067 - mongodb_client - INFO - MongoDB client initialized successfully
+2025-07-12 13:55:56,607 - mongodb_client - INFO - MongoDB client initialized successfully
+2025-07-12 13:56:35,776 - mongodb_client - INFO - MongoDB client initialized successfully
+2025-07-12 13:57:05,711 - mongodb_client - INFO - MongoDB client initialized successfully
+2025-07-12 13:57:20,869 - mongodb_client - INFO - MongoDB client initialized successfully
+2025-07-12 13:57:29,491 - googlemaps.client - INFO - API queries_quota: 60
+2025-07-12 13:57:29,491 - mcp_tool_registry - INFO - Registered MCP tool: google_maps
+2025-07-12 13:57:29,498 - mcp_tool_registry - INFO - Registered MCP tool: weather
+2025-07-12 13:57:29,501 - mcp_tool_registry - INFO - Registered MCP tool: travel_mcp_tool
+2025-07-12 13:57:30,506 - gemini_client - INFO - Gemini client initialized successfully
+2025-07-12 13:57:30,518 - agent.orchestrator - INFO - Initialized agent orchestrator (Trip Planning Orchestrator)
+2025-07-12 13:57:30,518 - agent.profiler - INFO - Initialized agent profiler (Travel Profiler)
+2025-07-12 13:57:30,518 - agent.itinerary - INFO - Initialized agent itinerary (Itinerary Planner)
+2025-07-12 13:57:30,518 - agent.critique - INFO - Initialized agent critique (Itinerary Critic)
+2025-07-12 13:57:30,518 - agent.monitor - INFO - Initialized agent monitor (Trip Monitor)
+2025-07-12 13:57:30,518 - agent.profiler - INFO - Initialized agent profiler (Travel Profiler)
+2025-07-12 13:57:30,518 - agent.itinerary - INFO - Initialized agent itinerary (Itinerary Planner)
+2025-07-12 13:57:30,518 - agent.critique - INFO - Initialized agent critique (Itinerary Critic)
+2025-07-12 13:57:30,518 - agent.monitor - INFO - Initialized agent monitor (Trip Monitor)
+2025-07-12 13:57:30,520 - api_main - INFO - Starting AI Travel Planner API
+2025-07-12 13:57:30,520 - mongodb_client - ERROR - MongoDB health check failed: Event loop is closed
+2025-07-12 13:57:30,520 - api_main - ERROR - Database health check failed: {'overall': False, 'persistent_db': False, 'timestamp': None}
+2025-07-12 13:57:30,520 - api_main - ERROR - Startup failed: Database connections failed
+2025-07-12 13:57:35,051 - mongodb_client - INFO - MongoDB client initialized successfully
+2025-07-12 13:57:35,568 - googlemaps.client - INFO - API queries_quota: 60
+2025-07-12 13:57:35,568 - mcp_tool_registry - INFO - Registered MCP tool: google_maps
+2025-07-12 13:57:35,572 - mcp_tool_registry - INFO - Registered MCP tool: weather
+2025-07-12 13:57:35,575 - mcp_tool_registry - INFO - Registered MCP tool: travel_mcp_tool
+2025-07-12 13:57:35,710 - gemini_client - INFO - Gemini client initialized successfully
+2025-07-12 13:57:35,712 - agent.orchestrator - INFO - Initialized agent orchestrator (Trip Planning Orchestrator)
+2025-07-12 13:57:35,712 - agent.profiler - INFO - Initialized agent profiler (Travel Profiler)
+2025-07-12 13:57:35,712 - agent.itinerary - INFO - Initialized agent itinerary (Itinerary Planner)
+2025-07-12 13:57:35,712 - agent.critique - INFO - Initialized agent critique (Itinerary Critic)
+2025-07-12 13:57:35,712 - agent.monitor - INFO - Initialized agent monitor (Trip Monitor)
+2025-07-12 13:57:35,712 - agent.profiler - INFO - Initialized agent profiler (Travel Profiler)
+2025-07-12 13:57:35,712 - agent.itinerary - INFO - Initialized agent itinerary (Itinerary Planner)
+2025-07-12 13:57:35,712 - agent.critique - INFO - Initialized agent critique (Itinerary Critic)
+2025-07-12 13:57:35,712 - agent.monitor - INFO - Initialized agent monitor (Trip Monitor)
+2025-07-12 13:57:35,714 - api_main - INFO - Starting AI Travel Planner API
+2025-07-12 13:57:35,714 - mongodb_client - ERROR - MongoDB health check failed: Event loop is closed
+2025-07-12 13:57:35,714 - api_main - ERROR - Database health check failed: {'overall': False, 'persistent_db': False, 'timestamp': None}
+2025-07-12 13:57:35,714 - api_main - ERROR - Startup failed: Database connections failed
+2025-07-12 13:57:50,722 - mongodb_client - INFO - MongoDB client initialized successfully
+2025-07-12 13:57:51,234 - googlemaps.client - INFO - API queries_quota: 60
+2025-07-12 13:57:51,234 - mcp_tool_registry - INFO - Registered MCP tool: google_maps
+2025-07-12 13:57:51,238 - mcp_tool_registry - INFO - Registered MCP tool: weather
+2025-07-12 13:57:51,240 - mcp_tool_registry - INFO - Registered MCP tool: travel_mcp_tool
+2025-07-12 13:57:51,386 - gemini_client - INFO - Gemini client initialized successfully
+2025-07-12 13:57:51,389 - agent.orchestrator - INFO - Initialized agent orchestrator (Trip Planning Orchestrator)
+2025-07-12 13:57:51,389 - agent.profiler - INFO - Initialized agent profiler (Travel Profiler)
+2025-07-12 13:57:51,389 - agent.itinerary - INFO - Initialized agent itinerary (Itinerary Planner)
+2025-07-12 13:57:51,389 - agent.critique - INFO - Initialized agent critique (Itinerary Critic)
+2025-07-12 13:57:51,389 - agent.monitor - INFO - Initialized agent monitor (Trip Monitor)
+2025-07-12 13:57:51,389 - agent.profiler - INFO - Initialized agent profiler (Travel Profiler)
+2025-07-12 13:57:51,389 - agent.itinerary - INFO - Initialized agent itinerary (Itinerary Planner)
+2025-07-12 13:57:51,389 - agent.critique - INFO - Initialized agent critique (Itinerary Critic)
+2025-07-12 13:57:51,389 - agent.monitor - INFO - Initialized agent monitor (Trip Monitor)
+2025-07-12 13:57:51,391 - api_main - INFO - Starting AI Travel Planner API
+2025-07-12 13:57:51,391 - mongodb_client - ERROR - MongoDB health check failed: Event loop is closed
+2025-07-12 13:57:51,391 - api_main - WARNING - Database health check failed: {'overall': False, 'persistent_db': False, 'timestamp': None}
+2025-07-12 13:57:51,391 - api_main - WARNING - Server will start anyway and attempt to reconnect to database
+2025-07-12 13:58:01,806 - api_main - INFO - Shutting down AI Travel Planner API
+2025-07-12 13:58:01,806 - database_manager - ERROR - Error closing database connections: 'MongoDBClient' object has no attribute 'close_connections'
+2025-07-12 13:58:06,989 - mongodb_client - INFO - MongoDB client initialized successfully
+2025-07-12 13:58:07,483 - googlemaps.client - INFO - API queries_quota: 60
+2025-07-12 13:58:07,483 - mcp_tool_registry - INFO - Registered MCP tool: google_maps
+2025-07-12 13:58:07,486 - mcp_tool_registry - INFO - Registered MCP tool: weather
+2025-07-12 13:58:07,489 - mcp_tool_registry - INFO - Registered MCP tool: travel_mcp_tool
+2025-07-12 13:58:07,628 - gemini_client - INFO - Gemini client initialized successfully
+2025-07-12 13:58:07,631 - agent.orchestrator - INFO - Initialized agent orchestrator (Trip Planning Orchestrator)
+2025-07-12 13:58:07,631 - agent.profiler - INFO - Initialized agent profiler (Travel Profiler)
+2025-07-12 13:58:07,631 - agent.itinerary - INFO - Initialized agent itinerary (Itinerary Planner)
+2025-07-12 13:58:07,631 - agent.critique - INFO - Initialized agent critique (Itinerary Critic)
+2025-07-12 13:58:07,631 - agent.monitor - INFO - Initialized agent monitor (Trip Monitor)
+2025-07-12 13:58:07,631 - agent.profiler - INFO - Initialized agent profiler (Travel Profiler)
+2025-07-12 13:58:07,631 - agent.itinerary - INFO - Initialized agent itinerary (Itinerary Planner)
+2025-07-12 13:58:07,631 - agent.critique - INFO - Initialized agent critique (Itinerary Critic)
+2025-07-12 13:58:07,631 - agent.monitor - INFO - Initialized agent monitor (Trip Monitor)
+2025-07-12 13:58:07,633 - api_main - INFO - Starting AI Travel Planner API
+2025-07-12 13:58:07,633 - mongodb_client - ERROR - MongoDB health check failed: Event loop is closed
+2025-07-12 13:58:07,633 - api_main - WARNING - Database health check failed: {'overall': False, 'persistent_db': False, 'timestamp': None}
+2025-07-12 13:58:07,633 - api_main - WARNING - Server will start anyway and attempt to reconnect to database
+2025-07-12 13:58:29,375 - api_main - INFO - Shutting down AI Travel Planner API
+2025-07-12 13:58:29,375 - database_manager - ERROR - Error closing database connections: 'MongoDBClient' object has no attribute 'close_connections'
+2025-07-12 13:58:30,928 - mongodb_client - INFO - MongoDB client initialized successfully
+2025-07-12 13:58:31,400 - googlemaps.client - INFO - API queries_quota: 60
+2025-07-12 13:58:31,401 - mcp_tool_registry - INFO - Registered MCP tool: google_maps
+2025-07-12 13:58:31,404 - mcp_tool_registry - INFO - Registered MCP tool: weather
+2025-07-12 13:58:31,406 - mcp_tool_registry - INFO - Registered MCP tool: travel_mcp_tool
+2025-07-12 13:58:31,533 - gemini_client - INFO - Gemini client initialized successfully
+2025-07-12 13:58:31,536 - agent.orchestrator - INFO - Initialized agent orchestrator (Trip Planning Orchestrator)
+2025-07-12 13:58:31,536 - agent.profiler - INFO - Initialized agent profiler (Travel Profiler)
+2025-07-12 13:58:31,536 - agent.itinerary - INFO - Initialized agent itinerary (Itinerary Planner)
+2025-07-12 13:58:31,536 - agent.critique - INFO - Initialized agent critique (Itinerary Critic)
+2025-07-12 13:58:31,536 - agent.monitor - INFO - Initialized agent monitor (Trip Monitor)
+2025-07-12 13:58:31,536 - agent.profiler - INFO - Initialized agent profiler (Travel Profiler)
+2025-07-12 13:58:31,536 - agent.itinerary - INFO - Initialized agent itinerary (Itinerary Planner)
+2025-07-12 13:58:31,536 - agent.critique - INFO - Initialized agent critique (Itinerary Critic)
+2025-07-12 13:58:31,536 - agent.monitor - INFO - Initialized agent monitor (Trip Monitor)
+2025-07-12 13:58:31,537 - api_main - INFO - Starting AI Travel Planner API
+2025-07-12 13:58:31,537 - mongodb_client - ERROR - MongoDB health check failed: Event loop is closed
+2025-07-12 13:58:31,537 - api_main - WARNING - Database health check failed: {'overall': False, 'persistent_db': False, 'timestamp': None}
+2025-07-12 13:58:31,537 - api_main - WARNING - Server will start anyway and attempt to reconnect to database

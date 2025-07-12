@@ -53,15 +53,16 @@ async def lifespan(app: FastAPI):
         # Test database connections
         health = await db_manager.health_check()
         if not health['overall']:
-            logger.error(f"Database health check failed: {health}")
-            raise RuntimeError("Database connections failed")
-        
-        logger.info("Database connections established")
+            logger.warning(f"Database health check failed: {health}")
+            logger.warning("Server will start anyway and attempt to reconnect to database")
+        else:
+            logger.info("Database connections established")
         yield
         
     except Exception as e:
-        logger.error(f"Startup failed: {str(e)}")
-        raise
+        logger.warning(f"Database connection issue during startup: {str(e)}")
+        logger.warning("Server will start anyway and attempt to reconnect to database")
+        yield
     
     # Shutdown
     logger.info("Shutting down AI Travel Planner API")

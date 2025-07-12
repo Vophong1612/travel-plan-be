@@ -47,6 +47,11 @@ class MongoDBClient:
     
     def _build_connection_string(self) -> str:
         """Build MongoDB connection string from settings."""
+        # Use the URI directly if provided
+        if settings.mongodb_uri:
+            return settings.mongodb_uri
+        
+        # Otherwise build from individual components
         if settings.mongodb_username and settings.mongodb_password:
             auth_part = f"{settings.mongodb_username}:{settings.mongodb_password}@"
         else:

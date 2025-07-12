@@ -8,22 +8,24 @@ pydantic>=2.5.0
 python-multipart>=0.0.6
 
 # MCP and tool integrations
-mcp>=1.0.0
+# mcp>=1.0.0  # Commented out - package not available
 httpx>=0.25.0
 aiohttp>=3.9.0
 requests>=2.31.0
+requests-cache>=1.0.0
 
 # Weather and mapping
 openmeteo-requests>=1.1.0
 retry-requests>=2.0.0
 numpy>=1.24.0
+pandas>=1.5.0
 googlemaps>=4.10.0
 
 # Flight and accommodation APIs
 amadeus>=8.0.0
-python-booking>=1.0.0
-duffel-api>=1.0.0
-exchangerate-api>=1.0.0
+# python-booking>=1.0.0  # Commented out - package not available
+# duffel-api>=1.0.0  # Commented out - package not available
+# exchangerate-api>=1.0.0  # Commented out - package not available
 
 # Database
 firebase-admin>=6.2.0
