@@ -27,10 +27,13 @@ class MongoDBClient:
         self.logger = logging.getLogger("mongodb_client")
         self.client = None
         self.db = None
-        self._initialize_mongodb()
+        self._initialized = False
     
-    def _initialize_mongodb(self):
-        """Initialize MongoDB connection."""
+    async def initialize(self):
+        """Initialize MongoDB connection asynchronously."""
+        if self._initialized:
+            return
+            
         try:
             # Build connection string
             connection_string = self._build_connection_string()
@@ -39,6 +42,10 @@ class MongoDBClient:
             self.client = AsyncIOMotorClient(connection_string)
             self.db = self.client[settings.mongodb_database]
             
+            # Test the connection
+            await self.client.admin.command('ping')
+            
+            self._initialized = True
             self.logger.info("MongoDB client initialized successfully")
             
         except Exception as e:
@@ -67,6 +74,10 @@ class MongoDBClient:
     async def health_check(self) -> Dict[str, Any]:
         """Check MongoDB connection health."""
         try:
+            # Initialize if not already done
+            if not self._initialized:
+                await self.initialize()
+            
             # Ping the database
             await self.client.admin.command('ping')
             
@@ -74,6 +85,7 @@ class MongoDBClient:
             stats = await self.db.command("dbstats")
             
             return {
+                "overall": True,
                 "mongodb": {
                     "status": "healthy",
                     "database": settings.mongodb_database,
@@ -86,17 +98,24 @@ class MongoDBClient:
         except Exception as e:
             self.logger.error(f"MongoDB health check failed: {str(e)}")
             return {
+                "overall": False,
                 "mongodb": {
                     "status": "unhealthy",
                     "error": str(e)
                 }
             }
     
+    async def _ensure_initialized(self):
+        """Ensure MongoDB client is initialized."""
+        if not self._initialized:
+            await self.initialize()
+    
     # User Profile Management
     
     async def save_user_profile(self, user_profile: UserProfile) -> bool:
         """Save user profile to MongoDB."""
         try:
+            await self._ensure_initialized()
             collection = self.db.user_profiles
             
             # Convert to dict and handle datetime serialization
@@ -120,6 +139,7 @@ class MongoDBClient:
     async def get_user_profile(self, user_id: str) -> Optional[UserProfile]:
         """Get user profile from MongoDB."""
         try:
+            await self._ensure_initialized()
             collection = self.db.user_profiles
             
             profile_data = await collection.find_one({"user_id": user_id})
@@ -139,6 +159,7 @@ class MongoDBClient:
     async def delete_user_profile(self, user_id: str) -> bool:
         """Delete user profile from MongoDB."""
         try:
+            await self._ensure_initialized()
             collection = self.db.user_profiles
             
             result = await collection.delete_one({"user_id": user_id})
@@ -153,11 +174,37 @@ class MongoDBClient:
             self.logger.error(f"Error deleting user profile: {str(e)}")
             return False
     
+    async def update_user_profile(self, user_id: str, updates: Dict[str, Any]) -> bool:
+        """Update user profile in MongoDB."""
+        try:
+            await self._ensure_initialized()
+            collection = self.db.user_profiles
+            
+            # Add timestamp to updates
+            updates["updated_at"] = datetime.utcnow()
+            
+            # Update the profile
+            result = await collection.update_one(
+                {"user_id": user_id},
+                {"$set": updates}
+            )
+            
+            if result.matched_count > 0:
+                self.logger.info(f"Updated user profile for {user_id}")
+                return True
+            
+            return False
+            
+        except Exception as e:
+            self.logger.error(f"Error updating user profile: {str(e)}")
+            return False
+    
     # Trip Management
     
     async def save_trip(self, trip: Trip) -> bool:
         """Save trip to MongoDB."""
         try:
+            await self._ensure_initialized()
             collection = self.db.trips
             
             # Convert to dict and handle serialization
@@ -181,6 +228,7 @@ class MongoDBClient:
     async def get_trip(self, trip_id: str) -> Optional[Trip]:
         """Get trip from MongoDB."""
         try:
+            await self._ensure_initialized()
             collection = self.db.trips
             
             trip_data = await collection.find_one({"trip_id": trip_id})
@@ -199,6 +247,7 @@ class MongoDBClient:
     async def get_user_trips(self, user_id: str, limit: int = 20) -> List[Trip]:
         """Get trips for a user from MongoDB."""
         try:
+            await self._ensure_initialized()
             collection = self.db.trips
             
             cursor = collection.find({"user_id": user_id}).sort("created_at", -1).limit(limit)
@@ -218,6 +267,7 @@ class MongoDBClient:
     async def delete_trip(self, trip_id: str) -> bool:
         """Delete trip from MongoDB."""
         try:
+            await self._ensure_initialized()
             collection = self.db.trips
             
             result = await collection.delete_one({"trip_id": trip_id})
@@ -235,6 +285,7 @@ class MongoDBClient:
     async def save_trip_details(self, trip_details: Dict[str, Any]) -> bool:
         """Save trip details to MongoDB."""
         try:
+            await self._ensure_initialized()
             collection = self.db.trips
             
             # Serialize and add timestamps
@@ -266,6 +317,7 @@ class MongoDBClient:
     async def save_itinerary_day(self, trip_id: str, day_number: int, itinerary: ItineraryDay) -> bool:
         """Save daily itinerary to MongoDB."""
         try:
+            await self._ensure_initialized()
             collection = self.db.itineraries
             
             # Convert to dict and handle serialization
@@ -293,6 +345,7 @@ class MongoDBClient:
     async def get_itinerary_day(self, trip_id: str, day_number: int) -> Optional[ItineraryDay]:
         """Get daily itinerary from MongoDB."""
         try:
+            await self._ensure_initialized()
             collection = self.db.itineraries
             
             itinerary_data = await collection.find_one({
@@ -316,6 +369,7 @@ class MongoDBClient:
     async def get_trip_itineraries(self, trip_id: str) -> List[ItineraryDay]:
         """Get all itineraries for a trip from MongoDB."""
         try:
+            await self._ensure_initialized()
             collection = self.db.itineraries
             
             cursor = collection.find({"trip_id": trip_id}).sort("day_number", 1)
@@ -339,6 +393,7 @@ class MongoDBClient:
     async def save_document(self, collection_name: str, document_id: str, data: Dict[str, Any]) -> bool:
         """Save generic document to MongoDB."""
         try:
+            await self._ensure_initialized()
             collection = self.db[collection_name]
             
             # Serialize and add metadata
@@ -363,6 +418,7 @@ class MongoDBClient:
     async def get_document(self, collection_name: str, document_id: str) -> Optional[Dict[str, Any]]:
         """Get generic document from MongoDB."""
         try:
+            await self._ensure_initialized()
             collection = self.db[collection_name]
             
             document_data = await collection.find_one({"document_id": document_id})
@@ -381,6 +437,7 @@ class MongoDBClient:
     async def delete_document(self, collection_name: str, document_id: str) -> bool:
         """Delete document from MongoDB."""
         try:
+            await self._ensure_initialized()
             collection = self.db[collection_name]
             
             result = await collection.delete_one({"document_id": document_id})
@@ -394,6 +451,7 @@ class MongoDBClient:
                             limit: int = 100, sort_by: Optional[str] = None) -> List[Dict[str, Any]]:
         """Query documents from MongoDB."""
         try:
+            await self._ensure_initialized()
             collection = self.db[collection_name]
             
             cursor = collection.find(query)
@@ -444,12 +502,13 @@ class MongoDBClient:
         
         return convert_value(data)
     
-    async def close_connection(self):
+    async def close_connections(self):
         """Close MongoDB connection."""
         if self.client:
             self.client.close()
             self.logger.info("MongoDB connection closed")
+            self._initialized = False
 
 
-# Global client instance
+# Global client instance - NOT initialized at module level
 mongodb_client = MongoDBClient() 

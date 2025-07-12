@@ -15,11 +15,8 @@ requests>=2.31.0
 requests-cache>=1.0.0
 
 # Weather and mapping
-openmeteo-requests>=1.1.0
-retry-requests>=2.0.0
-numpy>=1.24.0
-pandas>=1.5.0
 googlemaps>=4.10.0
+# OpenWeatherMap One Call API 3.0 uses standard requests library
 
 # Flight and accommodation APIs
 amadeus>=8.0.0

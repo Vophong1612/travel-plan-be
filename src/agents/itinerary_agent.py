@@ -29,7 +29,7 @@ class ItineraryAgent(BaseAgent):
             agent_id="itinerary",
             name="Itinerary Planner",
             description="Generates detailed daily itineraries using real-time data and user preferences",
-            tools=["google_maps", "weather", "travel_mcp_tool"]
+            tools=["google_maps", "weather"]
         )
         
         # Activity type preferences mapping
@@ -342,16 +342,7 @@ class ItineraryAgent(BaseAgent):
                 self.logger.error(f"Error finding activities for {activity_type}: {str(e)}")
                 continue
         
-        # Get travel-specific recommendations using the new travel MCP tool
-        try:
-            travel_recommendations = await self._get_travel_recommendations(
-                destination, 
-                user_profile,
-                target_date
-            )
-            suggestions.extend(travel_recommendations)
-        except Exception as e:
-            self.logger.error(f"Error getting travel recommendations: {str(e)}")
+        # Note: Travel MCP tool removed - relying on Google Maps for activity suggestions
         
         # Filter based on weather conditions
         if weather_info and not weather_info.get("error"):
@@ -362,137 +353,7 @@ class ItineraryAgent(BaseAgent):
         
         return suggestions[:20]  # Limit to top 20 suggestions
     
-    async def _get_travel_recommendations(self,
-                                        destination: str,
-                                        user_profile: UserProfile,
-                                        target_date: date) -> List[Dict[str, Any]]:
-        """Get travel recommendations using the Travel MCP Tool."""
-        recommendations = []
-        
-        try:
-            # Get city information
-            city_info_response = await self.use_tool(
-                "travel_mcp_tool",
-                action="get_city_info",
-                city_name=destination
-            )
-            
-            if city_info_response.success:
-                city_info = city_info_response.data
-                
-                # Convert city attractions to activity suggestions
-                attractions = city_info.get("attractions", [])
-                for attraction in attractions:
-                    recommendation = {
-                        "name": attraction,
-                        "type": "sightseeing",
-                        "location": {
-                            "name": attraction,
-                            "address": f"{attraction}, {destination}",
-                            "latitude": None,
-                            "longitude": None,
-                            "place_id": None
-                        },
-                        "rating": None,
-                        "price_level": None,
-                        "opening_hours": None,
-                        "types": ["tourist_attraction"],
-                        "photos": [],
-                        "source": "travel_mcp_tool"
-                    }
-                    recommendations.append(recommendation)
-            
-            # Get weather forecast to enhance recommendations
-            weather_response = await self.use_tool(
-                "travel_mcp_tool",
-                action="get_weather_forecast",
-                location=destination
-            )
-            
-            if weather_response.success:
-                weather_data = weather_response.data
-                forecast = weather_data.get("forecast", [])
-                
-                # Add weather-appropriate activity recommendations
-                for day_forecast in forecast:
-                    if day_forecast.get("date") == target_date.isoformat():
-                        condition = day_forecast.get("condition", "").lower()
-                        
-                        if "sunny" in condition or "clear" in condition:
-                            # Recommend outdoor activities
-                            recommendations.append({
-                                "name": f"Outdoor exploration in {destination}",
-                                "type": "outdoor",
-                                "location": {
-                                    "name": f"Outdoor areas in {destination}",
-                                    "address": destination,
-                                    "latitude": None,
-                                    "longitude": None,
-                                    "place_id": None
-                                },
-                                "rating": None,
-                                "price_level": 0,
-                                "opening_hours": None,
-                                "types": ["outdoor"],
-                                "photos": [],
-                                "source": "travel_mcp_tool_weather"
-                            })
-                        elif "rain" in condition or "cloudy" in condition:
-                            # Recommend indoor activities
-                            recommendations.append({
-                                "name": f"Indoor cultural activities in {destination}",
-                                "type": "cultural",
-                                "location": {
-                                    "name": f"Cultural venues in {destination}",
-                                    "address": destination,
-                                    "latitude": None,
-                                    "longitude": None,
-                                    "place_id": None
-                                },
-                                "rating": None,
-                                "price_level": 1,
-                                "opening_hours": None,
-                                "types": ["cultural"],
-                                "photos": [],
-                                "source": "travel_mcp_tool_weather"
-                            })
-                        break
-            
-            # Get airport information if user is flying
-            if user_profile.preferences.accommodation_type.value in ["hotel", "resort"]:
-                airport_response = await self.use_tool(
-                    "travel_mcp_tool",
-                    action="get_airport_info",
-                    airport_code=destination[:3]  # Try first 3 chars as airport code
-                )
-                
-                if airport_response.success:
-                    airports = airport_response.data.get("airports", [])
-                    for airport in airports:
-                        # Add airport transfer as activity if relevant
-                        if airport.get("city", "").lower() in destination.lower():
-                            recommendations.append({
-                                "name": f"Airport transfer to {airport['name']}",
-                                "type": "transport",
-                                "location": {
-                                    "name": airport["name"],
-                                    "address": f"{airport['name']}, {airport.get('city', '')}",
-                                    "latitude": airport.get("geoCode", {}).get("latitude"),
-                                    "longitude": airport.get("geoCode", {}).get("longitude"),
-                                    "place_id": airport.get("iataCode")
-                                },
-                                "rating": None,
-                                "price_level": 2,
-                                "opening_hours": None,
-                                "types": ["transit_station"],
-                                "photos": [],
-                                "source": "travel_mcp_tool_airport"
-                            })
-            
-        except Exception as e:
-            self.logger.error(f"Error getting travel recommendations: {str(e)}")
-        
-        return recommendations
+
     
     async def _find_activities_by_type(self, 
                                      destination: str, 

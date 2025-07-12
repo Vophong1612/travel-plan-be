@@ -7,14 +7,14 @@ This module contains all the MCP (Model Context Protocol) tools for external ser
 from .base_mcp_tool import BaseMCPTool, MCPToolResponse, MCPToolError, tool_registry
 from .google_maps_tool import GoogleMapsTool
 from .weather_tool import WeatherTool
-from .travel_mcp_tool import TravelMCPTool
+from .tripadvisor_tool import TripAdvisorTool
 
 # Register all tools
 def register_all_tools():
     """Register all available MCP tools."""
     tool_registry.register(GoogleMapsTool())
     tool_registry.register(WeatherTool())
-    tool_registry.register(TravelMCPTool())
+    tool_registry.register(TripAdvisorTool())
 
 # Auto-register tools when module is imported
 register_all_tools()
@@ -26,6 +26,6 @@ __all__ = [
     'tool_registry',
     'GoogleMapsTool',
     'WeatherTool',
-    'TravelMCPTool',
+    'TripAdvisorTool',
     'register_all_tools'
 ] 

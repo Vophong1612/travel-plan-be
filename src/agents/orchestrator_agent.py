@@ -48,7 +48,7 @@ class OrchestratorAgent(BaseAgent):
             agent_id="orchestrator",
             name="Trip Planning Orchestrator",
             description="Manages end-to-end trip planning and coordination between all agents",
-            tools=["travel_mcp_tool"]  # Orchestrator uses travel tool for budget calculation and flight search
+            tools=[]  # Orchestrator focuses on coordination, specific tools are used by specialized agents
         )
         
         # Initialize sub-agents
@@ -116,7 +116,12 @@ class OrchestratorAgent(BaseAgent):
             return await self._reset_session(content)
         elif message_type == "get_chat_history":
             return await self._get_chat_history(content)
+        elif message_type == "extract_trip_info":
+            return await self._extract_trip_info(content)
         else:
+            print("="*100)
+            print(message_type)
+            print("="*100)
             return self._create_error_response(f"Unknown message type: {message_type}")
     
     async def _start_trip_planning(self, content: Dict[str, Any]) -> AgentResponse:
@@ -771,58 +776,131 @@ class OrchestratorAgent(BaseAgent):
             self.logger.error(f"Error getting chat history: {str(e)}")
             return self._create_error_response(f"Failed to get chat history: {str(e)}")
     
+    async def _extract_trip_info(self, content: Dict[str, Any]) -> AgentResponse:
+        """Extract trip information from user message."""
+        try:
+            user_id = content.get("user_id")
+            user_message = content.get("user_message", "")
+            
+            if not user_message:
+                return self._create_error_response("user_message is required")
+            
+            # Use the existing trip parsing functionality
+            trip_info = await self._parse_trip_from_message(user_message)
+            
+            if not trip_info:
+                return self._create_success_response({
+                    "extracted_info": None,
+                    "message": "Could not extract trip information from the message"
+                })
+            
+            return self._create_success_response({
+                "extracted_info": trip_info,
+                "message": "Trip information extracted successfully"
+            })
+            
+        except Exception as e:
+            self.logger.error(f"Error extracting trip info: {str(e)}")
+            return self._create_error_response(f"Failed to extract trip info: {str(e)}")
+    
     # Helper methods for chat functionality
     
     async def _parse_trip_from_message(self, message: str) -> Optional[Dict[str, Any]]:
-        """Parse trip information from user message."""
+        """Parse trip information from user message using AI."""
         try:
-            # Simple keyword-based parsing (in production, use AI for better parsing)
-            message_lower = message.lower()
+            # Use AI to extract trip information from the message
+            extraction_prompt = f"""
+            Extract trip information from this user message: "{message}"
             
-            # Common destination keywords
-            destinations = ["paris", "tokyo", "new york", "london", "rome", "barcelona", "amsterdam", "berlin", "prague", "vienna"]
-            found_destination = None
-            for dest in destinations:
-                if dest in message_lower:
-                    found_destination = dest.title()
-                    break
+            Please identify and extract the following information:
+            1. Destination (city/place name) - any location mentioned
+            2. Duration (number of days) - look for patterns like "3-day", "5 days", "week", etc.
+            3. Any specific dates mentioned
+            4. Travel preferences (food, activities, budget level)
+            5. Number of travelers
             
-            if not found_destination:
+            If specific dates are not mentioned, assume the trip starts 30 days from today.
+            If duration is not specified, assume 5 days.
+            
+            Return your response in the exact JSON format requested in the schema.
+            """
+            
+            # Define the expected JSON schema
+            schema = {
+                "type": "object",
+                "properties": {
+                    "destination": {
+                        "type": "string",
+                        "description": "The destination city or place name"
+                    },
+                    "duration_days": {
+                        "type": "integer",
+                        "description": "Number of days for the trip"
+                    },
+                    "start_date": {
+                        "type": "string",
+                        "format": "date",
+                        "description": "Start date in YYYY-MM-DD format"
+                    },
+                    "end_date": {
+                        "type": "string", 
+                        "format": "date",
+                        "description": "End date in YYYY-MM-DD format"
+                    },
+                    "food_preferences": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": "List of food preferences mentioned"
+                    },
+                    "activities": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": "List of activities or interests mentioned"
+                    },
+                    "travelers": {
+                        "type": "integer",
+                        "description": "Number of travelers",
+                        "default": 1,
+                        "minimum": 1
+                    },
+                    "budget_level": {
+                        "type": "string",
+                        "enum": ["budget", "mid-range", "luxury"],
+                        "description": "Budget level if mentioned"
+                    }
+                },
+                "required": ["destination", "duration_days", "start_date", "end_date"]
+            }
+            
+            # Call AI to extract information
+            extraction_result = await self.generate_ai_json_response(
+                prompt=extraction_prompt,
+                schema=schema
+            )
+            
+            # Validate the result
+            if not extraction_result or not extraction_result.get("destination"):
+                self.logger.info(f"No valid trip information found in message: {message}")
                 return None
             
-            # Simple date parsing (very basic)
-            import re
-            from datetime import datetime, timedelta
-            
-            # Look for date patterns
-            date_patterns = [
-                r"(\d{1,2})[-/](\d{1,2})[-/](\d{4})",  # MM/DD/YYYY or DD/MM/YYYY
-                r"(\d{4})[-/](\d{1,2})[-/](\d{1,2})",  # YYYY/MM/DD
-            ]
-            
-            start_date = None
-            end_date = None
-            
-            # For demo purposes, use current date + 30 days as default
-            current_date = datetime.now().date()
-            start_date = current_date + timedelta(days=30)
-            end_date = start_date + timedelta(days=4)  # 5-day trip
-            
-            # Look for duration keywords
-            if "week" in message_lower or "7 days" in message_lower:
-                end_date = start_date + timedelta(days=6)
-            elif "month" in message_lower or "30 days" in message_lower:
-                end_date = start_date + timedelta(days=29)
+            # Convert date strings to date objects for consistency
+            from datetime import datetime
+            start_date = datetime.strptime(extraction_result["start_date"], "%Y-%m-%d").date()
+            end_date = datetime.strptime(extraction_result["end_date"], "%Y-%m-%d").date()
             
             return {
-                "destination": found_destination,
+                "destination": extraction_result["destination"],
                 "start_date": start_date,
                 "end_date": end_date,
-                "duration_days": (end_date - start_date).days + 1
+                "duration_days": extraction_result["duration_days"],
+                "food_preferences": extraction_result.get("food_preferences", []),
+                "activities": extraction_result.get("activities", []),
+                "travelers": extraction_result.get("travelers", 1),
+                "budget_level": extraction_result.get("budget_level", "mid-range")
             }
             
         except Exception as e:
-            self.logger.error(f"Error parsing trip from message: {str(e)}")
+            self.logger.error(f"Error parsing trip from message with AI: {str(e)}")
             return None
     
     async def _handle_confirmation(self, session: PlanningSession, content: Dict[str, Any]) -> AgentResponse:

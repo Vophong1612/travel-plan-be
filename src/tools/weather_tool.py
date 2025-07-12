@@ -1,29 +1,37 @@
-import openmeteo_requests
-import requests_cache
-import pandas as pd
-from retry_requests import retry
+import requests
+import asyncio
 from typing import Dict, Any, List, Optional, Union
 from datetime import datetime, date, timedelta
+import os
 from src.tools.base_mcp_tool import BaseMCPTool, MCPToolResponse, MCPToolError
+from src.config.settings import settings
 
 
 class WeatherTool(BaseMCPTool):
-    """Weather MCP tool using Open-Meteo API for weather information."""
+    """Weather MCP tool using OpenWeatherMap One Call API 3.0 for comprehensive weather information."""
     
     def __init__(self):
         super().__init__(
             name="weather",
-            description="Get current weather conditions, forecasts, and historical weather data"
+            description="Get current weather, forecasts, historical data, and weather alerts using OpenWeatherMap One Call API 3.0"
         )
         
-        # Setup the Open-Meteo API client with cache and retry on error
-        cache_session = requests_cache.CachedSession('.cache', expire_after=3600)
-        retry_session = retry(cache_session, retries=5, backoff_factor=0.2)
-        self.openmeteo = openmeteo_requests.Client(session=retry_session)
+        # Get API key from settings
+        self.api_key = os.getenv("OPENWEATHER_API_KEY") or settings.get("OPENWEATHER_API_KEY")
+        
+        if not self.api_key:
+            self.logger.warning("OpenWeatherMap API key not found. Set OPENWEATHER_API_KEY environment variable.")
         
         # API URLs
-        self.weather_api_url = "https://api.open-meteo.com/v1/forecast"
-        self.geocoding_api_url = "https://geocoding-api.open-meteo.com/v1/search"
+        self.onecall_api_url = "https://api.openweathermap.org/data/3.0/onecall"
+        self.geocoding_api_url = "https://api.openweathermap.org/geo/1.0/direct"
+        self.reverse_geocoding_api_url = "https://api.openweathermap.org/geo/1.0/reverse"
+        
+        # Request session for connection pooling
+        self.session = requests.Session()
+        self.session.headers.update({
+            'User-Agent': 'AI-Travel-Planner/1.0'
+        })
     
     def get_schema(self) -> Dict[str, Any]:
         """Get the tool's parameter schema."""
@@ -32,50 +40,53 @@ class WeatherTool(BaseMCPTool):
             "properties": {
                 "action": {
                     "type": "string",
-                    "enum": ["current_weather", "weather_forecast", "hourly_forecast", "weather_alerts"],
+                    "enum": ["current_weather", "weather_forecast", "hourly_forecast", "weather_alerts", "weather_overview"],
                     "description": "The weather action to perform"
                 },
                 "location": {
                     "type": "string",
-                    "description": "Location name (city, address, etc.)"
+                    "description": "Location name (city, state, country)"
                 },
                 "latitude": {
                     "type": "number",
-                    "description": "Latitude coordinate"
+                    "description": "Latitude coordinate (-90 to 90)"
                 },
                 "longitude": {
                     "type": "number",
-                    "description": "Longitude coordinate"
+                    "description": "Longitude coordinate (-180 to 180)"
                 },
                 "days": {
                     "type": "integer",
-                    "description": "Number of forecast days (1-16, default: 7)",
+                    "description": "Number of forecast days (1-8, default: 7)",
                     "default": 7,
                     "minimum": 1,
-                    "maximum": 16
+                    "maximum": 8
                 },
                 "hours": {
                     "type": "integer",
-                    "description": "Number of forecast hours (1-168, default: 24)",
+                    "description": "Number of forecast hours (1-48, default: 24)",
                     "default": 24,
                     "minimum": 1,
-                    "maximum": 168
-                },
-                "timezone": {
-                    "type": "string",
-                    "description": "Timezone for the forecast (default: auto)",
-                    "default": "auto"
+                    "maximum": 48
                 },
                 "units": {
                     "type": "string",
-                    "enum": ["celsius", "fahrenheit"],
-                    "description": "Temperature units (default: celsius)",
-                    "default": "celsius"
+                    "enum": ["standard", "metric", "imperial"],
+                    "description": "Units of measurement (default: metric)",
+                    "default": "metric"
                 },
-                "include_alerts": {
-                    "type": "boolean",
-                    "description": "Include weather alerts if available (default: true)",
-                    "default": True
+                "lang": {
+                    "type": "string",
+                    "description": "Language code for weather descriptions (default: en)",
+                    "default": "en"
+                },
+                "exclude": {
+                    "type": "array",
+                    "items": {
+                        "type": "string",
+                        "enum": ["current", "minutely", "hourly", "daily", "alerts"]
+                    },
+                    "description": "Parts of the weather data to exclude"
                 }
             },
             "required": ["action"]
@@ -83,6 +94,9 @@ class WeatherTool(BaseMCPTool):
     
     def validate_parameters(self, params: Dict[str, Any]) -> bool:
         """Validate parameters for the specific action."""
+        if not self.api_key:
+            return False
+            
         action = params.get("action")
         
         # Must have either location or coordinates
@@ -93,7 +107,7 @@ class WeatherTool(BaseMCPTool):
             return False
         
         # Validate specific action requirements
-        if action in ["current_weather", "weather_forecast", "hourly_forecast", "weather_alerts"]:
+        if action in ["current_weather", "weather_forecast", "hourly_forecast", "weather_alerts", "weather_overview"]:
             return True
         
         return False
@@ -101,6 +115,9 @@ class WeatherTool(BaseMCPTool):
     async def execute(self, **kwargs) -> MCPToolResponse:
         """Execute the weather tool."""
         try:
+            if not self.api_key:
+                return self._handle_error("OpenWeatherMap API key not configured. Please set OPENWEATHER_API_KEY environment variable.")
+            
             action = kwargs.get("action")
             
             # Get coordinates if location is provided
@@ -110,6 +127,7 @@ class WeatherTool(BaseMCPTool):
                     return self._handle_error("Could not find location coordinates")
                 kwargs["latitude"] = coords["latitude"]
                 kwargs["longitude"] = coords["longitude"]
+                kwargs["location_info"] = coords
             
             if action == "current_weather":
                 return await self._get_current_weather(kwargs)
@@ -119,6 +137,8 @@ class WeatherTool(BaseMCPTool):
                 return await self._get_hourly_forecast(kwargs)
             elif action == "weather_alerts":
                 return await self._get_weather_alerts(kwargs)
+            elif action == "weather_overview":
+                return await self._get_weather_overview(kwargs)
             else:
                 return self._handle_error(f"Unknown action: {action}")
                 
@@ -126,25 +146,25 @@ class WeatherTool(BaseMCPTool):
             return self._handle_error(str(e))
     
     async def _geocode_location(self, location: str) -> Optional[Dict[str, Any]]:
-        """Geocode location name to coordinates."""
+        """Geocode location name to coordinates using OpenWeatherMap Geocoding API."""
         try:
             params = {
-                "name": location,
-                "count": 1,
-                "language": "en",
-                "format": "json"
+                "q": location,
+                "limit": 1,
+                "appid": self.api_key
             }
             
             response = await self._make_request("GET", self.geocoding_api_url, params=params)
             
-            if "results" in response and response["results"]:
-                result = response["results"][0]
+            if response and len(response) > 0:
+                result = response[0]
                 return {
-                    "latitude": result["latitude"],
-                    "longitude": result["longitude"],
+                    "latitude": result["lat"],
+                    "longitude": result["lon"],
                     "name": result["name"],
                     "country": result.get("country", ""),
-                    "timezone": result.get("timezone", "auto")
+                    "state": result.get("state", ""),
+                    "local_names": result.get("local_names", {})
                 }
             
             return None
@@ -154,287 +174,246 @@ class WeatherTool(BaseMCPTool):
             return None
     
     async def _get_current_weather(self, params: Dict[str, Any]) -> MCPToolResponse:
-        """Get current weather conditions."""
+        """Get current weather conditions using One Call API 3.0."""
         try:
             latitude = params["latitude"]
             longitude = params["longitude"]
-            units = params.get("units", "celsius")
-            timezone = params.get("timezone", "auto")
-            
-            # Define weather parameters
-            current_params = [
-                "temperature_2m", "relative_humidity_2m", "apparent_temperature",
-                "is_day", "precipitation", "rain", "showers", "snowfall",
-                "weather_code", "cloud_cover", "pressure_msl", "surface_pressure",
-                "wind_speed_10m", "wind_direction_10m", "wind_gusts_10m"
-            ]
+            units = params.get("units", "metric")
+            lang = params.get("lang", "en")
             
             api_params = {
-                "latitude": latitude,
-                "longitude": longitude,
-                "current": current_params,
-                "timezone": timezone,
-                "temperature_unit": units,
-                "wind_speed_unit": "kmh",
-                "precipitation_unit": "mm"
+                "lat": latitude,
+                "lon": longitude,
+                "exclude": "minutely,hourly,daily,alerts",
+                "units": units,
+                "lang": lang,
+                "appid": self.api_key
             }
             
-            responses = self.openmeteo.weather_api(self.weather_api_url, params=api_params)
-            response = responses[0]
+            response = await self._make_request("GET", self.onecall_api_url, params=api_params)
             
-            # Current weather data
-            current = response.Current()
+            if "current" not in response:
+                return self._handle_error("No current weather data available")
             
+            current = response["current"]
+            
+            # Process current weather data
             current_weather = {
-                "temperature": current.Variables(0).Value(),
-                "relative_humidity": current.Variables(1).Value(),
-                "apparent_temperature": current.Variables(2).Value(),
-                "is_day": bool(current.Variables(3).Value()),
-                "precipitation": current.Variables(4).Value(),
-                "rain": current.Variables(5).Value(),
-                "showers": current.Variables(6).Value(),
-                "snowfall": current.Variables(7).Value(),
-                "weather_code": int(current.Variables(8).Value()),
-                "cloud_cover": current.Variables(9).Value(),
-                "pressure_msl": current.Variables(10).Value(),
-                "surface_pressure": current.Variables(11).Value(),
-                "wind_speed": current.Variables(12).Value(),
-                "wind_direction": current.Variables(13).Value(),
-                "wind_gusts": current.Variables(14).Value(),
-                "time": datetime.fromtimestamp(current.Time()).isoformat()
+                "dt": current["dt"],
+                "timestamp": datetime.fromtimestamp(current["dt"]).isoformat(),
+                "sunrise": datetime.fromtimestamp(current["sunrise"]).isoformat(),
+                "sunset": datetime.fromtimestamp(current["sunset"]).isoformat(),
+                "temperature": current["temp"],
+                "feels_like": current["feels_like"],
+                "pressure": current["pressure"],
+                "humidity": current["humidity"],
+                "dew_point": current["dew_point"],
+                "uvi": current["uvi"],
+                "clouds": current["clouds"],
+                "visibility": current.get("visibility", 0),
+                "wind_speed": current["wind_speed"],
+                "wind_deg": current["wind_deg"],
+                "wind_gust": current.get("wind_gust", 0),
+                "weather": current["weather"]
             }
             
-            # Add weather description
-            current_weather["condition"] = self._get_weather_description(current_weather["weather_code"])
+            # Add rain and snow data if available
+            if "rain" in current:
+                current_weather["rain"] = current["rain"]
+            if "snow" in current:
+                current_weather["snow"] = current["snow"]
             
             return self._handle_success({
                 "location": {
                     "latitude": latitude,
                     "longitude": longitude,
-                    "timezone": response.Timezone().decode('utf-8')
+                    "timezone": response["timezone"],
+                    "timezone_offset": response["timezone_offset"]
                 },
                 "current_weather": current_weather,
-                "units": {
-                    "temperature": "°C" if units == "celsius" else "°F",
-                    "wind_speed": "km/h",
-                    "precipitation": "mm"
-                }
+                "units": self._get_units_description(units)
             })
             
         except Exception as e:
             return self._handle_error(f"Current weather request failed: {str(e)}")
     
     async def _get_weather_forecast(self, params: Dict[str, Any]) -> MCPToolResponse:
-        """Get daily weather forecast."""
+        """Get daily weather forecast using One Call API 3.0."""
         try:
             latitude = params["latitude"]
             longitude = params["longitude"]
-            days = params.get("days", 7)
-            units = params.get("units", "celsius")
-            timezone = params.get("timezone", "auto")
-            
-            # Define daily forecast parameters
-            daily_params = [
-                "weather_code", "temperature_2m_max", "temperature_2m_min",
-                "apparent_temperature_max", "apparent_temperature_min",
-                "precipitation_sum", "rain_sum", "showers_sum", "snowfall_sum",
-                "precipitation_hours", "precipitation_probability_max",
-                "wind_speed_10m_max", "wind_gusts_10m_max", "wind_direction_10m_dominant",
-                "sunrise", "sunset", "uv_index_max"
-            ]
+            days = min(params.get("days", 7), 8)  # OpenWeatherMap supports max 8 days
+            units = params.get("units", "metric")
+            lang = params.get("lang", "en")
             
             api_params = {
-                "latitude": latitude,
-                "longitude": longitude,
-                "daily": daily_params,
-                "timezone": timezone,
-                "forecast_days": days,
-                "temperature_unit": units,
-                "wind_speed_unit": "kmh",
-                "precipitation_unit": "mm"
+                "lat": latitude,
+                "lon": longitude,
+                "exclude": "current,minutely,hourly,alerts",
+                "units": units,
+                "lang": lang,
+                "appid": self.api_key
             }
             
-            responses = self.openmeteo.weather_api(self.weather_api_url, params=api_params)
-            response = responses[0]
+            response = await self._make_request("GET", self.onecall_api_url, params=api_params)
             
-            # Daily forecast data
-            daily = response.Daily()
+            if "daily" not in response:
+                return self._handle_error("No daily forecast data available")
+            
+            daily_forecast = response["daily"][:days]
             
             forecast_days = []
-            for i in range(days):
+            for day in daily_forecast:
                 day_data = {
-                    "date": datetime.fromtimestamp(daily.Time()[i]).date().isoformat(),
-                    "weather_code": int(daily.Variables(0).ValuesAsNumpy()[i]),
-                    "temperature_max": daily.Variables(1).ValuesAsNumpy()[i],
-                    "temperature_min": daily.Variables(2).ValuesAsNumpy()[i],
-                    "apparent_temperature_max": daily.Variables(3).ValuesAsNumpy()[i],
-                    "apparent_temperature_min": daily.Variables(4).ValuesAsNumpy()[i],
-                    "precipitation_sum": daily.Variables(5).ValuesAsNumpy()[i],
-                    "rain_sum": daily.Variables(6).ValuesAsNumpy()[i],
-                    "showers_sum": daily.Variables(7).ValuesAsNumpy()[i],
-                    "snowfall_sum": daily.Variables(8).ValuesAsNumpy()[i],
-                    "precipitation_hours": daily.Variables(9).ValuesAsNumpy()[i],
-                    "precipitation_probability_max": daily.Variables(10).ValuesAsNumpy()[i],
-                    "wind_speed_max": daily.Variables(11).ValuesAsNumpy()[i],
-                    "wind_gusts_max": daily.Variables(12).ValuesAsNumpy()[i],
-                    "wind_direction_dominant": daily.Variables(13).ValuesAsNumpy()[i],
-                    "sunrise": datetime.fromtimestamp(daily.Variables(14).ValuesAsNumpy()[i]).isoformat(),
-                    "sunset": datetime.fromtimestamp(daily.Variables(15).ValuesAsNumpy()[i]).isoformat(),
-                    "uv_index_max": daily.Variables(16).ValuesAsNumpy()[i]
+                    "dt": day["dt"],
+                    "date": datetime.fromtimestamp(day["dt"]).date().isoformat(),
+                    "sunrise": datetime.fromtimestamp(day["sunrise"]).isoformat(),
+                    "sunset": datetime.fromtimestamp(day["sunset"]).isoformat(),
+                    "moonrise": datetime.fromtimestamp(day["moonrise"]).isoformat() if day.get("moonrise") else None,
+                    "moonset": datetime.fromtimestamp(day["moonset"]).isoformat() if day.get("moonset") else None,
+                    "moon_phase": day["moon_phase"],
+                    "summary": day.get("summary", ""),
+                    "temperature": day["temp"],
+                    "feels_like": day["feels_like"],
+                    "pressure": day["pressure"],
+                    "humidity": day["humidity"],
+                    "dew_point": day["dew_point"],
+                    "wind_speed": day["wind_speed"],
+                    "wind_deg": day["wind_deg"],
+                    "wind_gust": day.get("wind_gust", 0),
+                    "weather": day["weather"],
+                    "clouds": day["clouds"],
+                    "pop": day["pop"],  # Probability of precipitation
+                    "uvi": day["uvi"]
                 }
                 
-                # Add weather description
-                day_data["condition"] = self._get_weather_description(day_data["weather_code"])
+                # Add precipitation data if available
+                if "rain" in day:
+                    day_data["rain"] = day["rain"]
+                if "snow" in day:
+                    day_data["snow"] = day["snow"]
+                
                 forecast_days.append(day_data)
             
             return self._handle_success({
                 "location": {
                     "latitude": latitude,
                     "longitude": longitude,
-                    "timezone": response.Timezone().decode('utf-8')
+                    "timezone": response["timezone"],
+                    "timezone_offset": response["timezone_offset"]
                 },
                 "forecast_days": forecast_days,
-                "units": {
-                    "temperature": "°C" if units == "celsius" else "°F",
-                    "wind_speed": "km/h",
-                    "precipitation": "mm"
-                }
+                "units": self._get_units_description(units)
             })
             
         except Exception as e:
             return self._handle_error(f"Weather forecast request failed: {str(e)}")
     
     async def _get_hourly_forecast(self, params: Dict[str, Any]) -> MCPToolResponse:
-        """Get hourly weather forecast."""
+        """Get hourly weather forecast using One Call API 3.0."""
         try:
             latitude = params["latitude"]
             longitude = params["longitude"]
-            hours = params.get("hours", 24)
-            units = params.get("units", "celsius")
-            timezone = params.get("timezone", "auto")
-            
-            # Define hourly forecast parameters
-            hourly_params = [
-                "temperature_2m", "relative_humidity_2m", "apparent_temperature",
-                "precipitation_probability", "precipitation", "rain", "showers", "snowfall",
-                "weather_code", "cloud_cover", "visibility", "wind_speed_10m",
-                "wind_direction_10m", "wind_gusts_10m", "is_day"
-            ]
+            hours = min(params.get("hours", 24), 48)  # OpenWeatherMap supports max 48 hours
+            units = params.get("units", "metric")
+            lang = params.get("lang", "en")
             
             api_params = {
-                "latitude": latitude,
-                "longitude": longitude,
-                "hourly": hourly_params,
-                "timezone": timezone,
-                "forecast_hours": hours,
-                "temperature_unit": units,
-                "wind_speed_unit": "kmh",
-                "precipitation_unit": "mm"
+                "lat": latitude,
+                "lon": longitude,
+                "exclude": "current,minutely,daily,alerts",
+                "units": units,
+                "lang": lang,
+                "appid": self.api_key
             }
             
-            responses = self.openmeteo.weather_api(self.weather_api_url, params=api_params)
-            response = responses[0]
+            response = await self._make_request("GET", self.onecall_api_url, params=api_params)
             
-            # Hourly forecast data
-            hourly = response.Hourly()
+            if "hourly" not in response:
+                return self._handle_error("No hourly forecast data available")
+            
+            hourly_forecast = response["hourly"][:hours]
             
             forecast_hours = []
-            for i in range(hours):
+            for hour in hourly_forecast:
                 hour_data = {
-                    "time": datetime.fromtimestamp(hourly.Time()[i]).isoformat(),
-                    "temperature": hourly.Variables(0).ValuesAsNumpy()[i],
-                    "relative_humidity": hourly.Variables(1).ValuesAsNumpy()[i],
-                    "apparent_temperature": hourly.Variables(2).ValuesAsNumpy()[i],
-                    "precipitation_probability": hourly.Variables(3).ValuesAsNumpy()[i],
-                    "precipitation": hourly.Variables(4).ValuesAsNumpy()[i],
-                    "rain": hourly.Variables(5).ValuesAsNumpy()[i],
-                    "showers": hourly.Variables(6).ValuesAsNumpy()[i],
-                    "snowfall": hourly.Variables(7).ValuesAsNumpy()[i],
-                    "weather_code": int(hourly.Variables(8).ValuesAsNumpy()[i]),
-                    "cloud_cover": hourly.Variables(9).ValuesAsNumpy()[i],
-                    "visibility": hourly.Variables(10).ValuesAsNumpy()[i],
-                    "wind_speed": hourly.Variables(11).ValuesAsNumpy()[i],
-                    "wind_direction": hourly.Variables(12).ValuesAsNumpy()[i],
-                    "wind_gusts": hourly.Variables(13).ValuesAsNumpy()[i],
-                    "is_day": bool(hourly.Variables(14).ValuesAsNumpy()[i])
+                    "dt": hour["dt"],
+                    "timestamp": datetime.fromtimestamp(hour["dt"]).isoformat(),
+                    "temperature": hour["temp"],
+                    "feels_like": hour["feels_like"],
+                    "pressure": hour["pressure"],
+                    "humidity": hour["humidity"],
+                    "dew_point": hour["dew_point"],
+                    "uvi": hour["uvi"],
+                    "clouds": hour["clouds"],
+                    "visibility": hour.get("visibility", 0),
+                    "wind_speed": hour["wind_speed"],
+                    "wind_deg": hour["wind_deg"],
+                    "wind_gust": hour.get("wind_gust", 0),
+                    "weather": hour["weather"],
+                    "pop": hour["pop"]  # Probability of precipitation
                 }
                 
-                # Add weather description
-                hour_data["condition"] = self._get_weather_description(hour_data["weather_code"])
+                # Add precipitation data if available
+                if "rain" in hour:
+                    hour_data["rain"] = hour["rain"]
+                if "snow" in hour:
+                    hour_data["snow"] = hour["snow"]
+                
                 forecast_hours.append(hour_data)
             
             return self._handle_success({
                 "location": {
                     "latitude": latitude,
                     "longitude": longitude,
-                    "timezone": response.Timezone().decode('utf-8')
+                    "timezone": response["timezone"],
+                    "timezone_offset": response["timezone_offset"]
                 },
                 "forecast_hours": forecast_hours,
-                "units": {
-                    "temperature": "°C" if units == "celsius" else "°F",
-                    "wind_speed": "km/h",
-                    "precipitation": "mm"
-                }
+                "units": self._get_units_description(units)
             })
             
         except Exception as e:
             return self._handle_error(f"Hourly forecast request failed: {str(e)}")
     
     async def _get_weather_alerts(self, params: Dict[str, Any]) -> MCPToolResponse:
-        """Get weather alerts for the location."""
+        """Get weather alerts using One Call API 3.0."""
         try:
-            # Open-Meteo doesn't provide weather alerts directly
-            # This is a placeholder for potential integration with other services
-            # or parsing of severe weather conditions from forecast data
-            
             latitude = params["latitude"]
             longitude = params["longitude"]
+            units = params.get("units", "metric")
+            lang = params.get("lang", "en")
             
-            # For now, analyze current and forecast conditions for potential alerts
-            current_weather = await self._get_current_weather(params)
+            api_params = {
+                "lat": latitude,
+                "lon": longitude,
+                "exclude": "current,minutely,hourly,daily",
+                "units": units,
+                "lang": lang,
+                "appid": self.api_key
+            }
+            
+            response = await self._make_request("GET", self.onecall_api_url, params=api_params)
             
             alerts = []
-            
-            if current_weather.success:
-                weather_data = current_weather.data["current_weather"]
-                
-                # Check for severe weather conditions
-                if weather_data["wind_speed"] > 50:  # Strong wind
-                    alerts.append({
-                        "type": "wind",
-                        "severity": "high",
-                        "title": "Strong Wind Warning",
-                        "description": f"Wind speed: {weather_data['wind_speed']} km/h"
-                    })
-                
-                if weather_data["precipitation"] > 20:  # Heavy rain
-                    alerts.append({
-                        "type": "precipitation",
-                        "severity": "medium",
-                        "title": "Heavy Rain Warning",
-                        "description": f"Heavy precipitation: {weather_data['precipitation']} mm"
-                    })
-                
-                if weather_data["temperature"] < -10:  # Extreme cold
-                    alerts.append({
-                        "type": "temperature",
-                        "severity": "high",
-                        "title": "Extreme Cold Warning",
-                        "description": f"Temperature: {weather_data['temperature']}°C"
-                    })
-                
-                if weather_data["temperature"] > 40:  # Extreme heat
-                    alerts.append({
-                        "type": "temperature",
-                        "severity": "high",
-                        "title": "Extreme Heat Warning",
-                        "description": f"Temperature: {weather_data['temperature']}°C"
-                    })
+            if "alerts" in response:
+                for alert in response["alerts"]:
+                    alert_data = {
+                        "sender_name": alert["sender_name"],
+                        "event": alert["event"],
+                        "start": datetime.fromtimestamp(alert["start"]).isoformat(),
+                        "end": datetime.fromtimestamp(alert["end"]).isoformat(),
+                        "description": alert["description"],
+                        "tags": alert.get("tags", [])
+                    }
+                    alerts.append(alert_data)
             
             return self._handle_success({
                 "location": {
                     "latitude": latitude,
-                    "longitude": longitude
+                    "longitude": longitude,
+                    "timezone": response.get("timezone", ""),
+                    "timezone_offset": response.get("timezone_offset", 0)
                 },
                 "alerts": alerts,
                 "alert_count": len(alerts)
@@ -443,37 +422,108 @@ class WeatherTool(BaseMCPTool):
         except Exception as e:
             return self._handle_error(f"Weather alerts request failed: {str(e)}")
     
-    def _get_weather_description(self, weather_code: int) -> str:
-        """Convert weather code to human-readable description."""
-        weather_codes = {
-            0: "Clear sky",
-            1: "Mainly clear",
-            2: "Partly cloudy",
-            3: "Overcast",
-            45: "Fog",
-            48: "Depositing rime fog",
-            51: "Light drizzle",
-            53: "Moderate drizzle",
-            55: "Dense drizzle",
-            56: "Light freezing drizzle",
-            57: "Dense freezing drizzle",
-            61: "Slight rain",
-            63: "Moderate rain",
-            65: "Heavy rain",
-            66: "Light freezing rain",
-            67: "Heavy freezing rain",
-            71: "Slight snow fall",
-            73: "Moderate snow fall",
-            75: "Heavy snow fall",
-            77: "Snow grains",
-            80: "Slight rain showers",
-            81: "Moderate rain showers",
-            82: "Violent rain showers",
-            85: "Slight snow showers",
-            86: "Heavy snow showers",
-            95: "Thunderstorm",
-            96: "Thunderstorm with slight hail",
-            99: "Thunderstorm with heavy hail"
-        }
-        
-        return weather_codes.get(weather_code, f"Unknown weather code: {weather_code}") 
+    async def _get_weather_overview(self, params: Dict[str, Any]) -> MCPToolResponse:
+        """Get weather overview with AI-powered summary."""
+        try:
+            # Get both current weather and forecast for comprehensive overview
+            current_response = await self._get_current_weather(params)
+            forecast_response = await self._get_weather_forecast({**params, "days": 3})
+            
+            if not current_response.success or not forecast_response.success:
+                return self._handle_error("Could not retrieve weather data for overview")
+            
+            current_data = current_response.data
+            forecast_data = forecast_response.data
+            
+            # Create weather overview
+            overview = {
+                "location": current_data["location"],
+                "current_conditions": {
+                    "temperature": current_data["current_weather"]["temperature"],
+                    "condition": current_data["current_weather"]["weather"][0]["description"],
+                    "humidity": current_data["current_weather"]["humidity"],
+                    "wind_speed": current_data["current_weather"]["wind_speed"]
+                },
+                "today_forecast": forecast_data["forecast_days"][0] if forecast_data["forecast_days"] else None,
+                "three_day_outlook": forecast_data["forecast_days"][:3],
+                "summary": self._generate_weather_summary(current_data["current_weather"], forecast_data["forecast_days"][:3])
+            }
+            
+            return self._handle_success(overview)
+            
+        except Exception as e:
+            return self._handle_error(f"Weather overview request failed: {str(e)}")
+    
+    def _generate_weather_summary(self, current: Dict[str, Any], forecast: List[Dict[str, Any]]) -> str:
+        """Generate a human-readable weather summary."""
+        try:
+            current_condition = current["weather"][0]["description"]
+            current_temp = current["temperature"]
+            
+            summary = f"Currently {current_condition} with temperature at {current_temp}°. "
+            
+            if forecast:
+                today = forecast[0]
+                temp_range = f"{today['temperature']['min']}° to {today['temperature']['max']}°"
+                summary += f"Today's range: {temp_range}. "
+                
+                if today.get("rain"):
+                    summary += f"Rain expected: {today['rain']}mm. "
+                
+                if len(forecast) > 1:
+                    tomorrow = forecast[1]
+                    tomorrow_condition = tomorrow["weather"][0]["description"]
+                    summary += f"Tomorrow: {tomorrow_condition}."
+            
+            return summary
+            
+        except Exception as e:
+            return f"Weather summary unavailable: {str(e)}"
+    
+    def _get_units_description(self, units: str) -> Dict[str, str]:
+        """Get units description for the response."""
+        if units == "metric":
+            return {
+                "temperature": "°C",
+                "wind_speed": "m/s",
+                "pressure": "hPa",
+                "visibility": "m"
+            }
+        elif units == "imperial":
+            return {
+                "temperature": "°F",
+                "wind_speed": "mph",
+                "pressure": "hPa",
+                "visibility": "m"
+            }
+        else:  # standard
+            return {
+                "temperature": "K",
+                "wind_speed": "m/s",
+                "pressure": "hPa",
+                "visibility": "m"
+            }
+    
+    async def _make_request(self, method: str, url: str, **kwargs) -> Dict[str, Any]:
+        """Make HTTP request with error handling."""
+        try:
+            response = self.session.request(method, url, **kwargs)
+            response.raise_for_status()
+            
+            return response.json()
+            
+        except requests.exceptions.HTTPError as e:
+            if response.status_code == 401:
+                raise Exception("Invalid API key or unauthorized access")
+            elif response.status_code == 404:
+                raise Exception("Location not found")
+            elif response.status_code == 429:
+                raise Exception("API rate limit exceeded")
+            elif 500 <= response.status_code < 600:
+                raise Exception("OpenWeatherMap service temporarily unavailable")
+            else:
+                raise Exception(f"API request failed: {e}")
+        except requests.exceptions.RequestException as e:
+            raise Exception(f"Network error: {e}")
+        except ValueError as e:
+            raise Exception(f"Invalid JSON response: {e}") 

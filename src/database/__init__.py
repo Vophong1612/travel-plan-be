@@ -8,6 +8,7 @@ from .mongodb_client import MongoDBClient, mongodb_client
 from src.config.settings import settings
 from typing import Dict, Any, List, Optional
 import logging
+from datetime import datetime
 
 
 class DatabaseManager:
@@ -88,20 +89,19 @@ class DatabaseManager:
     async def health_check(self) -> Dict[str, Any]:
         """Check MongoDB health."""
         try:
-            health = {
-                'overall': True,
-                'persistent_db': False,
-                'timestamp': None
-            }
             persistent_health = await self.persistent_db.health_check()
-            health['persistent_db'] = persistent_health.get('overall', False)
-            health['overall'] = health['persistent_db']
+            health = {
+                'overall': persistent_health.get('overall', False),
+                'persistent_db': persistent_health.get('overall', False),
+                'timestamp': datetime.utcnow().isoformat()
+            }
             return health
         except Exception as e:
             self.logger.error(f"Health check failed: {str(e)}")
             return {
                 'overall': False,
                 'persistent_db': False,
+                'timestamp': datetime.utcnow().isoformat(),
                 'error': str(e)
             }
     

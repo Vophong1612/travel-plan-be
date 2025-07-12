@@ -115,7 +115,7 @@ nano .env
 # AI Model
 GEMINI_API_KEY=your-gemini-api-key
 
-# Location Services  
+# Location Services (Google Maps Platform)
 GOOGLE_MAPS_API_KEY=your-google-maps-api-key
 
 # Database
@@ -124,10 +124,15 @@ FIRESTORE_PROJECT_ID=your-google-cloud-project-id
 
 **Optional (Recommended):**
 ```bash
+# Weather Services (OpenWeatherMap One Call API 3.0)
+OPENWEATHER_API_KEY=your-openweather-api-key
+
+# TripAdvisor Content API
+TRIPADVISOR_API_KEY=your-tripadvisor-api-key
+
 # External APIs for enhanced functionality
 AMADEUS_API_KEY=your-amadeus-api-key
 AMADEUS_API_SECRET=your-amadeus-api-secret
-OPENWEATHER_API_KEY=your-openweather-api-key
 
 # Redis (if not using localhost)
 REDIS_HOST=localhost
@@ -135,10 +140,38 @@ REDIS_PORT=6379
 REDIS_PASSWORD=your-redis-password
 ```
 
-### 4. Database Setup
+### 4. Google Maps Platform Setup
+
+**Enable Required APIs:**
+1. Go to [Google Cloud Console](https://console.cloud.google.com/)
+2. Create a new project or select existing project
+3. Enable the following APIs:
+   - **Required**: Maps JavaScript API, Places API, Geocoding API, Directions API, Distance Matrix API, Elevation API, Time Zone API, Static Maps API, Street View API
+   - **Optional**: Address Validation API, Air Quality API, Pollen API, Solar API
+4. Create an API key with appropriate restrictions
+5. Set `GOOGLE_MAPS_API_KEY` in your `.env`
+
+### 5. TripAdvisor Content API Setup
+
+**Get TripAdvisor API Access:**
+1. Visit [TripAdvisor Developer Portal](https://developer-tripadvisor.com/)
+2. Sign up for a developer account
+3. Create a new application
+4. Get your API key from the dashboard
+5. Set `TRIPADVISOR_API_KEY` in your `.env`
+
+**Features Available:**
+- 7.5+ million locations worldwide
+- 1+ billion reviews and opinions
+- Up to 5 photos per location
+- Up to 5 reviews per location
+- 29 language support
+- Pay-as-you-go model (first 5000 calls free per month)
+
+### 6. Database Setup
 
 **Firestore:**
-1. Create a Google Cloud project
+1. Create a Google Cloud project (can be the same as Maps Platform)
 2. Enable Firestore API
 3. Download service account credentials (optional for local dev)
 4. Set `FIRESTORE_PROJECT_ID` in your `.env`
@@ -155,18 +188,27 @@ sudo systemctl start redis-server
 redis-cli ping
 ```
 
-### 5. Test the Setup
+### 6. Test the Setup
 
 ```bash
 # Test Gemini API integration
 python test_gemini_integration.py
 
+# Test Google Maps Platform integration
+python test_google_maps_integration.py
+
+# Test OpenWeatherMap integration
+python test_openweather_integration.py
+
+# Test TripAdvisor Content API integration
+python test_tripadvisor_integration.py
+
 # Should show:
 # ✅ All integration tests passed!
-# 🎯 Your AI Travel Planner is ready to use Gemini API!
+# 🎯 Your AI Travel Planner is ready to use comprehensive APIs!
 ```
 
-### 6. Run the Server
+### 7. Run the Server
 
 ```bash
 # Development mode
@@ -185,6 +227,15 @@ python run_server.py --port 8080
 ```bash
 # Test Gemini API integration
 python test_gemini_integration.py
+
+# Test OpenWeatherMap integration
+python test_openweather_integration.py
+
+# Test Google Maps Platform integration
+python test_google_maps_integration.py
+
+# Test TripAdvisor Content API integration
+python test_tripadvisor_integration.py
 
 # Test MCP tools integration
 python test_travel_mcp_integration.py
