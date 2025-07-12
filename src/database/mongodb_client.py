@@ -227,6 +227,35 @@ class MongoDBClient:
             self.logger.error(f"Error deleting trip: {str(e)}")
             return False
     
+    async def save_trip_details(self, trip_details: Dict[str, Any]) -> bool:
+        """Save trip details to MongoDB."""
+        try:
+            collection = self.db.trips
+            
+            # Serialize and add timestamps
+            trip_details = self._serialize_document(trip_details)
+            trip_details["updated_at"] = datetime.utcnow()
+            
+            # Ensure trip_id exists
+            trip_id = trip_details.get("trip_id")
+            if not trip_id:
+                self.logger.error("No trip_id provided in trip_details")
+                return False
+            
+            # Upsert trip details
+            result = await collection.replace_one(
+                {"trip_id": trip_id},
+                trip_details,
+                upsert=True
+            )
+            
+            self.logger.info(f"Saved trip details {trip_id}")
+            return True
+            
+        except Exception as e:
+            self.logger.error(f"Error saving trip details: {str(e)}")
+            return False
+    
     # Itinerary Management
     
     async def save_itinerary_day(self, trip_id: str, day_number: int, itinerary: ItineraryDay) -> bool:

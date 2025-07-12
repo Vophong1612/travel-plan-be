@@ -18,19 +18,6 @@ services:
     networks:
       - travel-network
 
-  # Redis for sessions (keeping existing)
-  redis:
-    image: redis:7.2-alpine
-    container_name: travel-planner-redis
-    restart: always
-    ports:
-      - "6379:6379"
-    command: redis-server --requirepass redis123
-    volumes:
-      - redis_data:/data
-    networks:
-      - travel-network
-
   # Optional: MongoDB Admin UI
   mongo-express:
     image: mongo-express:1.0.0-alpha
@@ -51,7 +38,6 @@ services:
 
 volumes:
   mongodb_data:
-  redis_data:
 
 networks:
   travel-network:

@@ -5,7 +5,7 @@ AI Travel Planner - Phase 2 Server Runner
 This script starts the AI Travel Planner backend server with all agents and database connections.
 Phase 2 includes:
 - Complete multi-agent system (Orchestrator, Profiler, Itinerary, Critique, Monitor)
-- Database integration (Firestore + Redis)
+- Database integration (Firestore or MongoDB)
 - REST API endpoints
 - MCP tool integrations
 
@@ -98,11 +98,10 @@ def print_startup_info():
     else:
         print(f"Database: Firestore ({settings.firestore_project_id})")
     
-    print(f"Redis: {settings.redis_host}:{settings.redis_port}")
     print(f"AI Model: {settings.gemini_model}")
     print("\n🔧 Phase 2 Features:")
     print("✅ Multi-Agent System (Orchestrator, Profiler, Itinerary, Critique, Monitor)")
-    print("✅ Database Integration (Firestore + Redis)")
+    print("✅ Database Integration (Firestore or MongoDB)")
     print("✅ MCP Tool Integration (Google Maps, Weather)")
     print("✅ REST API Endpoints")
     print("✅ Dynamic Replanning Engine")
@@ -124,15 +123,12 @@ async def test_connections():
         print("🔍 Testing database connections...")
         health = await db_manager.health_check()
         
-        if health['firestore']:
-            print("✅ Firestore connection: OK")
+        if health['persistent_db']:
+            db_type = "MongoDB" if settings.use_mongodb else "Firestore"
+            print(f"✅ {db_type} connection: OK")
         else:
-            print("❌ Firestore connection: FAILED")
-        
-        if health['redis']:
-            print("✅ Redis connection: OK")
-        else:
-            print("❌ Redis connection: FAILED")
+            db_type = "MongoDB" if settings.use_mongodb else "Firestore"
+            print(f"❌ {db_type} connection: FAILED")
         
         if health['overall']:
             print("✅ All database connections successful")
@@ -199,9 +195,9 @@ def main():
     try:
         uvicorn.run(**uvicorn_config)
     except KeyboardInterrupt:
-        print("\n👋 Server stopped by user")
+        print("\n🛑 Server stopped by user")
     except Exception as e:
-        logger.error(f"Server error: {str(e)}")
+        print(f"\n❌ Server failed to start: {str(e)}")
         sys.exit(1)
 
 

@@ -109,6 +109,13 @@ class OrchestratorAgent(BaseAgent):
             return await self._get_planning_status(content)
         elif message_type == "cancel_planning":
             return await self._cancel_planning(content)
+        # Chat-related message types
+        elif message_type == "get_session_status":
+            return await self._get_session_status(content)
+        elif message_type == "reset_session":
+            return await self._reset_session(content)
+        elif message_type == "get_chat_history":
+            return await self._get_chat_history(content)
         else:
             return self._create_error_response(f"Unknown message type: {message_type}")
     
@@ -117,21 +124,21 @@ class OrchestratorAgent(BaseAgent):
         try:
             # Extract trip parameters
             user_id = content.get("user_id")
-            destination = content.get("destination")
-            start_date = content.get("start_date")
-            end_date = content.get("end_date")
+            user_message = content.get("user_message", "")
             
-            if not all([user_id, destination, start_date, end_date]):
-                return self._create_error_response("user_id, destination, start_date, and end_date are required")
+            # Parse trip information from user message
+            trip_info = await self._parse_trip_from_message(user_message)
             
-            # Parse dates
-            if isinstance(start_date, str):
-                start_date = datetime.fromisoformat(start_date).date()
-            if isinstance(end_date, str):
-                end_date = datetime.fromisoformat(end_date).date()
+            if not trip_info:
+                return self._create_success_response({
+                    "message": "I'd be happy to help you plan a trip! Please tell me where you'd like to go and when. For example: 'I want to visit Paris from October 10th to October 15th' or 'Plan a 5-day trip to Tokyo in December'.",
+                    "planning_state": "waiting_for_details"
+                })
             
-            # Calculate trip duration
-            duration_days = (end_date - start_date).days + 1
+            destination = trip_info.get("destination")
+            start_date = trip_info.get("start_date")
+            end_date = trip_info.get("end_date")
+            duration_days = trip_info.get("duration_days", 1)
             
             # Generate trip ID
             trip_id = f"trip_{user_id}_{int(datetime.utcnow().timestamp())}"
@@ -202,9 +209,20 @@ class OrchestratorAgent(BaseAgent):
     async def _continue_planning(self, content: Dict[str, Any]) -> AgentResponse:
         """Continue the planning process."""
         try:
+            user_id = content.get("user_id")
+            user_message = content.get("user_message", "")
             trip_id = content.get("trip_id")
+            
+            # If no trip_id, try to find active session for user
+            if not trip_id:
+                for session in self.planning_sessions.values():
+                    if session.user_id == user_id:
+                        trip_id = session.trip_id
+                        break
+            
             if not trip_id or trip_id not in self.planning_sessions:
-                return self._create_error_response("Invalid trip_id")
+                # No active session, try to start new planning
+                return await self._start_trip_planning(content)
             
             session = self.planning_sessions[trip_id]
             
@@ -212,8 +230,14 @@ class OrchestratorAgent(BaseAgent):
                 return await self._continue_profiling(session, content)
             elif session.state == PlanningState.PLANNING:
                 return await self._continue_daily_planning(session, content)
+            elif session.state == PlanningState.CONFIRMING:
+                return await self._handle_confirmation(session, content)
             else:
-                return self._create_error_response(f"Cannot continue planning in state: {session.state}")
+                return self._create_success_response({
+                    "message": f"I'm currently in {session.state.value} state. How can I help you?",
+                    "trip_id": trip_id,
+                    "planning_state": session.state.value
+                })
                 
         except Exception as e:
             self.logger.error(f"Error continuing planning: {str(e)}")
@@ -653,4 +677,192 @@ class OrchestratorAgent(BaseAgent):
                 "description": "Cancel affected activities and extend others",
                 "estimated_impact": "high"
             }
-        ] 
+        ]
+    
+    # Chat-related handlers
+    
+    async def _get_session_status(self, content: Dict[str, Any]) -> AgentResponse:
+        """Get current session status for chat."""
+        try:
+            user_id = content.get("user_id")
+            if not user_id:
+                return self._create_error_response("user_id is required")
+            
+            # Find active session for user
+            active_session = None
+            for session in self.planning_sessions.values():
+                if session.user_id == user_id:
+                    active_session = session
+                    break
+            
+            if not active_session:
+                return self._create_success_response({
+                    "status": "no_active_session",
+                    "message": "No active planning session found"
+                })
+            
+            return self._create_success_response({
+                "status": "active",
+                "trip_id": active_session.trip_id,
+                "state": active_session.state.value,
+                "current_day": active_session.current_day,
+                "total_days": active_session.total_days,
+                "progress": active_session.current_day / active_session.total_days * 100 if active_session.total_days > 0 else 0,
+                "created_at": active_session.created_at.isoformat(),
+                "updated_at": active_session.updated_at.isoformat(),
+                "destination": active_session.context.get("destination") if active_session.context else None
+            })
+            
+        except Exception as e:
+            self.logger.error(f"Error getting session status: {str(e)}")
+            return self._create_error_response(f"Failed to get session status: {str(e)}")
+    
+    async def _reset_session(self, content: Dict[str, Any]) -> AgentResponse:
+        """Reset the current session for the user."""
+        try:
+            user_id = content.get("user_id")
+            if not user_id:
+                return self._create_error_response("user_id is required")
+            
+            # Find and remove active session for user
+            sessions_to_remove = []
+            for trip_id, session in self.planning_sessions.items():
+                if session.user_id == user_id:
+                    sessions_to_remove.append(trip_id)
+            
+            for trip_id in sessions_to_remove:
+                del self.planning_sessions[trip_id]
+            
+            return self._create_success_response({
+                "message": "Session reset successfully",
+                "sessions_removed": len(sessions_to_remove)
+            })
+            
+        except Exception as e:
+            self.logger.error(f"Error resetting session: {str(e)}")
+            return self._create_error_response(f"Failed to reset session: {str(e)}")
+    
+    async def _get_chat_history(self, content: Dict[str, Any]) -> AgentResponse:
+        """Get chat history for the user."""
+        try:
+            user_id = content.get("user_id")
+            if not user_id:
+                return self._create_error_response("user_id is required")
+            
+            # Get conversation history from orchestrator agent
+            history = self.get_conversation_history()
+            
+            # Filter for user-specific messages (simplified)
+            user_history = [
+                {
+                    "timestamp": msg.timestamp.isoformat(),
+                    "message_type": msg.message_type,
+                    "content": msg.content
+                }
+                for msg in history[-50:]  # Last 50 messages
+            ]
+            
+            return self._create_success_response({
+                "history": user_history,
+                "count": len(user_history)
+            })
+            
+        except Exception as e:
+            self.logger.error(f"Error getting chat history: {str(e)}")
+            return self._create_error_response(f"Failed to get chat history: {str(e)}")
+    
+    # Helper methods for chat functionality
+    
+    async def _parse_trip_from_message(self, message: str) -> Optional[Dict[str, Any]]:
+        """Parse trip information from user message."""
+        try:
+            # Simple keyword-based parsing (in production, use AI for better parsing)
+            message_lower = message.lower()
+            
+            # Common destination keywords
+            destinations = ["paris", "tokyo", "new york", "london", "rome", "barcelona", "amsterdam", "berlin", "prague", "vienna"]
+            found_destination = None
+            for dest in destinations:
+                if dest in message_lower:
+                    found_destination = dest.title()
+                    break
+            
+            if not found_destination:
+                return None
+            
+            # Simple date parsing (very basic)
+            import re
+            from datetime import datetime, timedelta
+            
+            # Look for date patterns
+            date_patterns = [
+                r"(\d{1,2})[-/](\d{1,2})[-/](\d{4})",  # MM/DD/YYYY or DD/MM/YYYY
+                r"(\d{4})[-/](\d{1,2})[-/](\d{1,2})",  # YYYY/MM/DD
+            ]
+            
+            start_date = None
+            end_date = None
+            
+            # For demo purposes, use current date + 30 days as default
+            current_date = datetime.now().date()
+            start_date = current_date + timedelta(days=30)
+            end_date = start_date + timedelta(days=4)  # 5-day trip
+            
+            # Look for duration keywords
+            if "week" in message_lower or "7 days" in message_lower:
+                end_date = start_date + timedelta(days=6)
+            elif "month" in message_lower or "30 days" in message_lower:
+                end_date = start_date + timedelta(days=29)
+            
+            return {
+                "destination": found_destination,
+                "start_date": start_date,
+                "end_date": end_date,
+                "duration_days": (end_date - start_date).days + 1
+            }
+            
+        except Exception as e:
+            self.logger.error(f"Error parsing trip from message: {str(e)}")
+            return None
+    
+    async def _handle_confirmation(self, session: PlanningSession, content: Dict[str, Any]) -> AgentResponse:
+        """Handle user confirmation in CONFIRMING state."""
+        try:
+            user_message = content.get("user_message", "").lower()
+            
+            # Check if user is confirming
+            confirm_keywords = ["yes", "okay", "sure", "confirm", "approve", "good", "perfect", "looks good"]
+            if any(keyword in user_message for keyword in confirm_keywords):
+                # Confirm the current day
+                return await self._confirm_day({
+                    "trip_id": session.trip_id,
+                    "day_number": session.current_day,
+                    "confirmed": True
+                })
+            else:
+                # User might be requesting changes
+                return await self._request_revision({
+                    "trip_id": session.trip_id,
+                    "day_number": session.current_day,
+                    "feedback": user_message
+                })
+                
+        except Exception as e:
+            self.logger.error(f"Error handling confirmation: {str(e)}")
+            return self._create_error_response(f"Failed to handle confirmation: {str(e)}")
+    
+    async def _continue_daily_planning(self, session: PlanningSession, content: Dict[str, Any]) -> AgentResponse:
+        """Continue daily planning process."""
+        try:
+            # For now, just return current status
+            return self._create_success_response({
+                "message": f"I'm currently planning day {session.current_day} of {session.total_days} for your trip to {session.context.get('destination')}. What would you like me to do?",
+                "trip_id": session.trip_id,
+                "planning_state": session.state.value,
+                "current_day": session.current_day,
+                "total_days": session.total_days
+            })
+            
+        except Exception as e:
+            self.logger.error(f"Error continuing daily planning: {str(e)}")
+            return self._create_error_response(f"Failed to continue daily planning: {str(e)}") 

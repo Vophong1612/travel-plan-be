@@ -2,20 +2,16 @@ import asyncio
 import logging
 from contextlib import asynccontextmanager
 from typing import Dict, Any, List, Optional
-from datetime import datetime, date
+from datetime import datetime
 
-from fastapi import FastAPI, HTTPException, Depends, BackgroundTasks, status
+from fastapi import FastAPI, HTTPException, status
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
 from pydantic import BaseModel, ValidationError
 
 from src.config.settings import settings
 from src.database import db_manager
 from src.agents import agent_registry
 from src.agents.base_agent import AgentMessage
-from src.models.user import UserProfile
-from src.models.trip import Trip, TripStatus
-from src.tools import tool_registry
 
 # Configure logging
 logging.basicConfig(
@@ -25,84 +21,23 @@ logging.basicConfig(
 logger = logging.getLogger("api_main")
 
 
-# Pydantic models for API requests/responses
-class TripCreateRequest(BaseModel):
-    destination: str
-    start_date: str
-    end_date: str
-    
+# Hardcoded user ID
+USER_ID = "1"
 
-class UserResponseRequest(BaseModel):
-    trip_id: str
-    user_response: str
-    
 
-class ProfileConfirmationRequest(BaseModel):
-    trip_id: str
-    confirmed: bool
-    modifications: Optional[Dict[str, Any]] = None
-    
+# Pydantic models for Chat API
+class ChatRequest(BaseModel):
+    """Chat request from user."""
+    message: str
 
-class DayConfirmationRequest(BaseModel):
-    trip_id: str
-    day_number: int
-    confirmed: bool
-    
 
-class RevisionRequest(BaseModel):
-    trip_id: str
-    day_number: int
-    feedback: str
-    
-
-class DisruptionRequest(BaseModel):
-    trip_id: str
-    disruption_type: str
-    details: str
-    
-
-class FlightSearchRequest(BaseModel):
-    origin: str
-    destination: str
-    departure_date: str
-    return_date: Optional[str] = None
-    adults: int = 1
-    children: int = 0
-    cabin_class: str = "economy"
-    currency: str = "USD"
-    
-
-class AccommodationSearchRequest(BaseModel):
-    location: str
-    check_in_date: str
-    check_out_date: str
-    guests: int = 1
-    rooms: int = 1
-    currency: str = "USD"
-    
-
-class CurrencyConversionRequest(BaseModel):
-    from_currency: str
-    to_currency: str
-    amount: float
-    
-
-class TravelInfoRequest(BaseModel):
-    destination: str
-    request_type: str  # "city_info", "airport_info", "weather_forecast"
-    additional_params: Optional[Dict[str, Any]] = None
-    
-
-class BudgetCalculationRequest(BaseModel):
-    destination: str
-    days: int
-    travelers: int = 1
-    budget_level: str = "medium"  # low, medium, high
-    
-
-class APIResponse(BaseModel):
+class ChatResponse(BaseModel):
+    """Response from chat API."""
     success: bool
-    data: Optional[Dict[str, Any]] = None
+    message: str
+    trip_id: Optional[str] = None
+    extracted_info: Optional[Dict[str, Any]] = None
+    trip_details: Optional[Dict[str, Any]] = None
     error: Optional[str] = None
     timestamp: datetime = datetime.utcnow()
 
@@ -151,839 +86,378 @@ app.add_middleware(
 )
 
 
-# Dependency for user authentication (simplified)
-async def get_current_user(user_id: str = "demo_user") -> str:
-    """Get current user ID. Simplified for demo purposes."""
-    return user_id
-
-
-# Error handlers
-@app.exception_handler(ValidationError)
-async def validation_exception_handler(request, exc: ValidationError):
-    return JSONResponse(
-        status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-        content=APIResponse(
+# Chat API Endpoint
+@app.post("/chat", response_model=ChatResponse)
+async def chat_with_planner(chat_request: ChatRequest):
+    """
+    Main chat endpoint for trip planning.
+    
+    Logic:
+    1. Call Main AI to classify and extract information (places, foods, datetime, etc.)
+    2. Call appropriate AI agents based on extracted information
+    3. Get trip details from agents
+    4. Store trip details in database
+    5. Return response
+    """
+    try:
+        logger.info(f"Chat request from user {USER_ID}: {chat_request.message[:100]}...")
+        
+        # Step 1: Call Main AI to classify and extract information
+        extracted_info = await _extract_trip_information(chat_request.message)
+        
+        if not extracted_info:
+            return ChatResponse(
+                success=False,
+                message="I couldn't understand your trip request. Please provide more details about where you want to go and when.",
+                error="No trip information extracted"
+            )
+        
+        # Step 2: Call appropriate AI agents based on extracted information
+        trip_details = await _coordinate_ai_agents(extracted_info)
+        
+        if not trip_details:
+            return ChatResponse(
+                success=False,
+                message="I encountered an error while planning your trip. Please try again.",
+                error="Failed to generate trip details"
+            )
+        
+        # Step 3: Store trip details in database
+        trip_id = await _store_trip_details(trip_details)
+        
+        # Step 4: Return response
+        return ChatResponse(
+            success=True,
+            message=_generate_response_message(trip_details),
+            trip_id=trip_id,
+            extracted_info=extracted_info,
+            trip_details=trip_details
+        )
+        
+    except Exception as e:
+        logger.error(f"Error in chat endpoint: {str(e)}")
+        return ChatResponse(
             success=False,
-            error=f"Validation error: {str(exc)}"
-        ).dict()
-    )
+            message="I'm sorry, something went wrong. Please try again.",
+            error=str(e)
+        )
 
 
-@app.exception_handler(HTTPException)
-async def http_exception_handler(request, exc: HTTPException):
-    return JSONResponse(
-        status_code=exc.status_code,
-        content=APIResponse(
-            success=False,
-            error=exc.detail
-        ).dict()
-    )
+# Helper functions
 
-
-# Health Check Endpoints
-
-@app.get("/health")
-async def health_check():
-    """Health check endpoint."""
+async def _extract_trip_information(message: str) -> Optional[Dict[str, Any]]:
+    """
+    Call Main AI to classify and extract trip information from user message.
+    
+    Extracts:
+    - Places/destinations
+    - Dates and duration
+    - Food preferences
+    - Activities/interests
+    - Budget information
+    - Number of travelers
+    """
     try:
-        db_health = await db_manager.health_check()
-        agent_status = agent_registry.list_agents()
-        
-        return APIResponse(
-            success=True,
-            data={
-                "status": "healthy",
-                "database": db_health,
-                "agents": len(agent_status),
-                "timestamp": datetime.utcnow().isoformat()
-            }
-        )
-    except Exception as e:
-        logger.error(f"Health check failed: {str(e)}")
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="Service unhealthy"
-        )
-
-
-@app.get("/agents")
-async def list_agents():
-    """List all available agents."""
-    try:
-        agents = agent_registry.list_agents()
-        metrics = agent_registry.get_agent_metrics()
-        
-        return APIResponse(
-            success=True,
-            data={
-                "agents": agents,
-                "metrics": metrics
-            }
-        )
-    except Exception as e:
-        logger.error(f"Error listing agents: {str(e)}")
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Failed to list agents"
-        )
-
-
-# User Profile Endpoints
-
-@app.post("/profile")
-async def create_or_update_profile(
-    profile_data: Dict[str, Any],
-    user_id: str = Depends(get_current_user)
-):
-    """Create or update user profile."""
-    try:
-        # Add user_id to profile data
-        profile_data["user_id"] = user_id
-        
-        # Create UserProfile object
-        user_profile = UserProfile(**profile_data)
-        
-        # Save to database
-        success = await db_manager.save_user_profile(user_profile)
-        
-        if success:
-            return APIResponse(
-                success=True,
-                data={"profile": user_profile.dict()}
-            )
-        else:
-            raise HTTPException(
-                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail="Failed to save profile"
-            )
-            
-    except ValidationError as e:
-        raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail=f"Invalid profile data: {str(e)}"
-        )
-    except Exception as e:
-        logger.error(f"Error creating profile: {str(e)}")
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Failed to create profile"
-        )
-
-
-@app.get("/profile")
-async def get_user_profile(user_id: str = Depends(get_current_user)):
-    """Get user profile."""
-    try:
-        profile = await db_manager.get_user_profile(user_id)
-        
-        if profile:
-            return APIResponse(
-                success=True,
-                data={"profile": profile.dict()}
-            )
-        else:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="Profile not found"
-            )
-            
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Error getting profile: {str(e)}")
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Failed to get profile"
-        )
-
-
-# Trip Planning Endpoints
-
-@app.post("/trips")
-async def start_trip_planning(
-    trip_request: TripCreateRequest,
-    user_id: str = Depends(get_current_user)
-):
-    """Initiate a new trip planning session."""
-    try:
-        # Send message to orchestrator agent
-        message = AgentMessage(
+        # Create AI message for information extraction
+        ai_message = AgentMessage(
             agent_id="api",
-            message_type="start_trip_planning",
+            message_type="extract_trip_info",
             content={
-                "user_id": user_id,
-                "destination": trip_request.destination,
-                "start_date": trip_request.start_date,
-                "end_date": trip_request.end_date
+                "user_id": USER_ID,
+                "user_message": message
             }
         )
         
-        response = await agent_registry.send_message("orchestrator", message)
+        # Send to orchestrator agent for AI processing
+        response = await agent_registry.send_message("orchestrator", ai_message)
         
-        if response.success:
-            return APIResponse(
-                success=True,
-                data=response.data
-            )
+        if response.success and response.data:
+            return response.data.get("extracted_info")
         else:
-            raise HTTPException(
-                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail=response.error
-            )
+            # Fallback: simple keyword-based extraction
+            return _simple_extraction_fallback(message)
             
     except Exception as e:
-        logger.error(f"Error starting trip planning: {str(e)}")
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Failed to start trip planning"
-        )
+        logger.error(f"Error extracting trip information: {str(e)}")
+        return _simple_extraction_fallback(message)
 
 
-@app.get("/trips/{trip_id}")
-async def get_trip(
-    trip_id: str,
-    user_id: str = Depends(get_current_user)
-):
-    """Get trip details and status."""
+def _simple_extraction_fallback(message: str) -> Optional[Dict[str, Any]]:
+    """Simple keyword-based extraction as fallback."""
+    message_lower = message.lower()
+    
+    # Extract destinations
+    destinations = ["paris", "tokyo", "new york", "london", "rome", "barcelona", "amsterdam", "berlin", "prague", "vienna"]
+    found_destination = None
+    for dest in destinations:
+        if dest in message_lower:
+            found_destination = dest.title()
+            break
+    
+    if not found_destination:
+        return None
+    
+    # Extract duration
+    duration_days = 5  # Default
+    if "week" in message_lower or "7 days" in message_lower:
+        duration_days = 7
+    elif "month" in message_lower or "30 days" in message_lower:
+        duration_days = 30
+    elif "3 days" in message_lower:
+        duration_days = 3
+    elif "10 days" in message_lower:
+        duration_days = 10
+    
+    # Extract food preferences
+    food_preferences = []
+    food_keywords = ["pizza", "sushi", "pasta", "steak", "seafood", "vegetarian", "vegan", "street food"]
+    for food in food_keywords:
+        if food in message_lower:
+            food_preferences.append(food)
+    
+    # Extract activities
+    activities = []
+    activity_keywords = ["museum", "shopping", "hiking", "beach", "culture", "history", "nightlife", "relax"]
+    for activity in activity_keywords:
+        if activity in message_lower:
+            activities.append(activity)
+    
+    # Calculate dates (30 days from now)
+    from datetime import datetime, timedelta
+    start_date = datetime.now().date() + timedelta(days=30)
+    end_date = start_date + timedelta(days=duration_days - 1)
+    
+    return {
+        "destination": found_destination,
+        "start_date": start_date.isoformat(),
+        "end_date": end_date.isoformat(),
+        "duration_days": duration_days,
+        "food_preferences": food_preferences,
+        "activities": activities,
+        "travelers": 1,  # Default
+        "budget_level": "medium"  # Default
+    }
+
+
+async def _coordinate_ai_agents(extracted_info: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    """
+    Coordinate AI agents to generate trip details.
+    
+    Agents used:
+    - Profiler Agent: Create user profile if needed
+    - Itinerary Agent: Generate detailed itinerary
+    - Critique Agent: Review and improve itinerary
+    """
     try:
-        # Get trip from database
-        trip = await db_manager.get_trip(trip_id)
+        # Step 1: Check if user profile exists, create if needed
+        user_profile = await _ensure_user_profile(extracted_info)
         
-        if not trip:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="Trip not found"
-            )
+        # Step 2: Generate itinerary
+        itinerary = await _generate_itinerary(extracted_info, user_profile)
         
-        # Check if user owns this trip
-        if trip.user_id != user_id:
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail="Access denied"
-            )
+        if not itinerary:
+            return None
         
-        # Get planning status from orchestrator
-        message = AgentMessage(
-            agent_id="api",
-            message_type="get_planning_status",
-            content={"trip_id": trip_id}
-        )
+        # Step 3: Critique and improve itinerary
+        improved_itinerary = await _critique_itinerary(itinerary, user_profile)
         
-        status_response = await agent_registry.send_message("orchestrator", message)
-        
-        return APIResponse(
-            success=True,
-            data={
-                "trip": trip.dict(),
-                "planning_status": status_response.data if status_response.success else None
-            }
-        )
-        
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Error getting trip: {str(e)}")
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Failed to get trip"
-        )
-
-
-@app.post("/trips/continue")
-async def continue_planning(
-    user_response: UserResponseRequest,
-    user_id: str = Depends(get_current_user)
-):
-    """Continue the planning process with user response."""
-    try:
-        # Send message to orchestrator agent
-        message = AgentMessage(
-            agent_id="api",
-            message_type="continue_planning",
-            content={
-                "trip_id": user_response.trip_id,
-                "user_response": user_response.user_response
-            }
-        )
-        
-        response = await agent_registry.send_message("orchestrator", message)
-        
-        if response.success:
-            return APIResponse(
-                success=True,
-                data=response.data
-            )
-        else:
-            raise HTTPException(
-                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail=response.error
-            )
-            
-    except Exception as e:
-        logger.error(f"Error continuing planning: {str(e)}")
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Failed to continue planning"
-        )
-
-
-# Itinerary Management Endpoints
-
-@app.get("/trips/{trip_id}/itinerary/{day_index}")
-async def get_itinerary_day(
-    trip_id: str,
-    day_index: int,
-    user_id: str = Depends(get_current_user)
-):
-    """Get detailed itinerary for a specific day."""
-    try:
-        # Verify trip ownership
-        trip = await db_manager.get_trip(trip_id)
-        if not trip or trip.user_id != user_id:
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail="Access denied"
-            )
-        
-        # Get itinerary day
-        itinerary_day = await db_manager.firestore.get_itinerary_day(trip_id, day_index)
-        
-        if itinerary_day:
-            return APIResponse(
-                success=True,
-                data={"itinerary": itinerary_day.dict()}
-            )
-        else:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="Itinerary day not found"
-            )
-            
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Error getting itinerary day: {str(e)}")
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Failed to get itinerary day"
-        )
-
-
-@app.post("/trips/{trip_id}/itinerary/{day_index}/confirm")
-async def confirm_day(
-    trip_id: str,
-    day_index: int,
-    confirmation: DayConfirmationRequest,
-    user_id: str = Depends(get_current_user)
-):
-    """Confirm the proposed plan for a specific day."""
-    try:
-        # Verify trip ownership
-        trip = await db_manager.get_trip(trip_id)
-        if not trip or trip.user_id != user_id:
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail="Access denied"
-            )
-        
-        # Send confirmation to orchestrator
-        message = AgentMessage(
-            agent_id="api",
-            message_type="confirm_day",
-            content={
-                "trip_id": trip_id,
-                "day_number": day_index,
-                "confirmed": confirmation.confirmed
-            }
-        )
-        
-        response = await agent_registry.send_message("orchestrator", message)
-        
-        if response.success:
-            return APIResponse(
-                success=True,
-                data=response.data
-            )
-        else:
-            raise HTTPException(
-                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail=response.error
-            )
-            
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Error confirming day: {str(e)}")
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Failed to confirm day"
-        )
-
-
-@app.post("/trips/{trip_id}/itinerary/{day_index}/request-changes")
-async def request_changes(
-    trip_id: str,
-    day_index: int,
-    revision: RevisionRequest,
-    user_id: str = Depends(get_current_user)
-):
-    """Request modifications to a proposed day's plan."""
-    try:
-        # Verify trip ownership
-        trip = await db_manager.get_trip(trip_id)
-        if not trip or trip.user_id != user_id:
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail="Access denied"
-            )
-        
-        # Send revision request to orchestrator
-        message = AgentMessage(
-            agent_id="api",
-            message_type="request_revision",
-            content={
-                "trip_id": trip_id,
-                "day_number": day_index,
-                "feedback": revision.feedback
-            }
-        )
-        
-        response = await agent_registry.send_message("orchestrator", message)
-        
-        if response.success:
-            return APIResponse(
-                success=True,
-                data=response.data
-            )
-        else:
-            raise HTTPException(
-                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail=response.error
-            )
-            
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Error requesting changes: {str(e)}")
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Failed to request changes"
-        )
-
-
-# Dynamic Replanning Endpoints
-
-@app.post("/trips/{trip_id}/replan")
-async def handle_disruption(
-    trip_id: str,
-    disruption: DisruptionRequest,
-    user_id: str = Depends(get_current_user)
-):
-    """Handle trip disruption and initiate dynamic replanning."""
-    try:
-        # Verify trip ownership
-        trip = await db_manager.get_trip(trip_id)
-        if not trip or trip.user_id != user_id:
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail="Access denied"
-            )
-        
-        # Send disruption to orchestrator
-        message = AgentMessage(
-            agent_id="api",
-            message_type="handle_disruption",
-            content={
-                "trip_id": trip_id,
-                "disruption": {
-                    "type": disruption.disruption_type,
-                    "details": disruption.details,
-                    "detected_at": datetime.utcnow().isoformat()
-                }
-            }
-        )
-        
-        response = await agent_registry.send_message("orchestrator", message)
-        
-        if response.success:
-            return APIResponse(
-                success=True,
-                data=response.data
-            )
-        else:
-            raise HTTPException(
-                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail=response.error
-            )
-            
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Error handling disruption: {str(e)}")
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Failed to handle disruption"
-        )
-
-
-# Monitoring Endpoints
-
-@app.post("/trips/{trip_id}/monitoring/start")
-async def start_monitoring(
-    trip_id: str,
-    user_id: str = Depends(get_current_user)
-):
-    """Start monitoring a trip for disruptions."""
-    try:
-        # Verify trip ownership
-        trip = await db_manager.get_trip(trip_id)
-        if not trip or trip.user_id != user_id:
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail="Access denied"
-            )
-        
-        # Start monitoring
-        message = AgentMessage(
-            agent_id="api",
-            message_type="start_trip_monitoring",
-            content={"trip_id": trip_id}
-        )
-        
-        response = await agent_registry.send_message("orchestrator", message)
-        
-        if response.success:
-            return APIResponse(
-                success=True,
-                data=response.data
-            )
-        else:
-            raise HTTPException(
-                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail=response.error
-            )
-            
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Error starting monitoring: {str(e)}")
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Failed to start monitoring"
-        )
-
-
-@app.get("/trips/{trip_id}/monitoring/status")
-async def get_monitoring_status(
-    trip_id: str,
-    user_id: str = Depends(get_current_user)
-):
-    """Get monitoring status for a trip."""
-    try:
-        # Verify trip ownership
-        trip = await db_manager.get_trip(trip_id)
-        if not trip or trip.user_id != user_id:
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail="Access denied"
-            )
-        
-        # Get monitoring status from monitor agent
-        message = AgentMessage(
-            agent_id="api",
-            message_type="get_monitoring_status",
-            content={"trip_id": trip_id}
-        )
-        
-        response = await agent_registry.send_message("monitor", message)
-        
-        if response.success:
-            return APIResponse(
-                success=True,
-                data=response.data
-            )
-        else:
-            return APIResponse(
-                success=True,
-                data={"monitoring": False, "message": "No active monitoring"}
-            )
-            
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Error getting monitoring status: {str(e)}")
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Failed to get monitoring status"
-        )
-
-
-# User Trip History
-
-@app.get("/trips")
-async def get_user_trips(
-    limit: Optional[int] = 10,
-    user_id: str = Depends(get_current_user)
-):
-    """Get user's trip history."""
-    try:
-        trips = await db_manager.get_user_trips(user_id, limit)
-        
-        return APIResponse(
-            success=True,
-            data={
-                "trips": [trip.dict() for trip in trips],
-                "count": len(trips)
-            }
-        )
-        
-    except Exception as e:
-        logger.error(f"Error getting user trips: {str(e)}")
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Failed to get trips"
-        )
-
-
-# Travel MCP Tool Endpoints
-
-@app.post("/travel/flights/search")
-async def search_flights(
-    flight_request: FlightSearchRequest,
-    user_id: str = Depends(get_current_user)
-):
-    """Search for flights using the Travel MCP Tool."""
-    try:
-        # Execute flight search using the travel MCP tool
-        response = await tool_registry.execute_tool(
-            "travel_mcp_tool",
-            action="search_flights",
-            origin=flight_request.origin,
-            destination=flight_request.destination,
-            departure_date=flight_request.departure_date,
-            return_date=flight_request.return_date,
-            adults=flight_request.adults,
-            children=flight_request.children,
-            cabin_class=flight_request.cabin_class,
-            currency=flight_request.currency
-        )
-        
-        if response.success:
-            return APIResponse(
-                success=True,
-                data=response.data
-            )
-        else:
-            return APIResponse(
-                success=False,
-                error=response.error
-            )
-    except Exception as e:
-        logger.error(f"Error searching flights: {str(e)}")
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Failed to search flights"
-        )
-
-
-@app.post("/travel/accommodation/search")
-async def search_accommodation(
-    accommodation_request: AccommodationSearchRequest,
-    user_id: str = Depends(get_current_user)
-):
-    """Search for accommodation using the Travel MCP Tool."""
-    try:
-        # Execute accommodation search using the travel MCP tool
-        response = await tool_registry.execute_tool(
-            "travel_mcp_tool",
-            action="search_accommodation",
-            location=accommodation_request.location,
-            check_in_date=accommodation_request.check_in_date,
-            check_out_date=accommodation_request.check_out_date,
-            guests=accommodation_request.guests,
-            rooms=accommodation_request.rooms,
-            currency=accommodation_request.currency
-        )
-        
-        if response.success:
-            return APIResponse(
-                success=True,
-                data=response.data
-            )
-        else:
-            return APIResponse(
-                success=False,
-                error=response.error
-            )
-    except Exception as e:
-        logger.error(f"Error searching accommodation: {str(e)}")
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Failed to search accommodation"
-        )
-
-
-@app.post("/travel/currency/convert")
-async def convert_currency(
-    currency_request: CurrencyConversionRequest,
-    user_id: str = Depends(get_current_user)
-):
-    """Convert currency using the Travel MCP Tool."""
-    try:
-        # Execute currency conversion using the travel MCP tool
-        response = await tool_registry.execute_tool(
-            "travel_mcp_tool",
-            action="convert_currency",
-            from_currency=currency_request.from_currency,
-            to_currency=currency_request.to_currency,
-            amount=currency_request.amount
-        )
-        
-        if response.success:
-            return APIResponse(
-                success=True,
-                data=response.data
-            )
-        else:
-            return APIResponse(
-                success=False,
-                error=response.error
-            )
-    except Exception as e:
-        logger.error(f"Error converting currency: {str(e)}")
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Failed to convert currency"
-        )
-
-
-@app.post("/travel/info")
-async def get_travel_info(
-    travel_info_request: TravelInfoRequest,
-    user_id: str = Depends(get_current_user)
-):
-    """Get travel information using the Travel MCP Tool."""
-    try:
-        # Map request type to action
-        action_mapping = {
-            "city_info": "get_city_info",
-            "airport_info": "get_airport_info",
-            "weather_forecast": "get_weather_forecast"
+        # Step 4: Compile trip details
+        trip_details = {
+            "user_id": USER_ID,
+            "destination": extracted_info["destination"],
+            "start_date": extracted_info["start_date"],
+            "end_date": extracted_info["end_date"],
+            "duration_days": extracted_info["duration_days"],
+            "user_profile": user_profile,
+            "itinerary": improved_itinerary,
+            "extracted_preferences": extracted_info,
+            "status": "planned",
+            "created_at": datetime.utcnow().isoformat()
         }
         
-        action = action_mapping.get(travel_info_request.request_type)
-        if not action:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Invalid request type"
-            )
+        return trip_details
         
-        # Prepare parameters
-        params = {"destination": travel_info_request.destination}
-        if travel_info_request.additional_params:
-            params.update(travel_info_request.additional_params)
+    except Exception as e:
+        logger.error(f"Error coordinating AI agents: {str(e)}")
+        return None
+
+
+async def _ensure_user_profile(extracted_info: Dict[str, Any]) -> Dict[str, Any]:
+    """Ensure user profile exists, create if needed."""
+    try:
+        # Check if profile exists in memory
+        existing_profile = agent_registry.get_agent("orchestrator").get_memory(f"user_profile_{USER_ID}", scope="user")
         
-        # Handle different parameter names for different actions
-        if action == "get_city_info":
-            params["city_name"] = params.pop("destination")
-        elif action == "get_airport_info":
-            params["airport_code"] = params.pop("destination")
-        elif action == "get_weather_forecast":
-            params["location"] = params.pop("destination")
+        if existing_profile:
+            return existing_profile
         
-        # Execute travel info request using the travel MCP tool
-        response = await tool_registry.execute_tool(
-            "travel_mcp_tool",
-            action=action,
-            **params
+        # Create new profile based on extracted info
+        profile = {
+            "user_id": USER_ID,
+            "preferences": {
+                "destinations": [extracted_info["destination"]],
+                "food_preferences": extracted_info.get("food_preferences", []),
+                "activities": extracted_info.get("activities", []),
+                "budget_level": extracted_info.get("budget_level", "medium"),
+                "travel_style": "flexible"
+            },
+            "traveler_info": {
+                "group_size": extracted_info.get("travelers", 1),
+                "travels_with": ["solo"] if extracted_info.get("travelers", 1) == 1 else ["group"]
+            }
+        }
+        
+        # Store profile in memory
+        agent_registry.get_agent("orchestrator").set_memory(f"user_profile_{USER_ID}", profile, scope="user")
+        
+        return profile
+        
+    except Exception as e:
+        logger.error(f"Error ensuring user profile: {str(e)}")
+        return {"user_id": USER_ID, "preferences": {}, "traveler_info": {"group_size": 1}}
+
+
+async def _generate_itinerary(extracted_info: Dict[str, Any], user_profile: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    """Generate itinerary using Itinerary Agent."""
+    try:
+        # Create message for itinerary generation
+        itinerary_message = AgentMessage(
+            agent_id="api",
+            message_type="generate_itinerary",
+            content={
+                "user_profile": user_profile,
+                "destination": extracted_info["destination"],
+                "start_date": extracted_info["start_date"],
+                "end_date": extracted_info["end_date"],
+                "duration_days": extracted_info["duration_days"],
+                "preferences": extracted_info
+            }
         )
+        
+        # Send to itinerary agent
+        response = await agent_registry.send_message("itinerary", itinerary_message)
         
         if response.success:
-            return APIResponse(
-                success=True,
-                data=response.data
-            )
+            return response.data.get("itinerary")
         else:
-            return APIResponse(
-                success=False,
-                error=response.error
-            )
+            logger.error(f"Itinerary generation failed: {response.error}")
+            return None
+            
     except Exception as e:
-        logger.error(f"Error getting travel info: {str(e)}")
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Failed to get travel information"
-        )
+        logger.error(f"Error generating itinerary: {str(e)}")
+        return None
 
 
-@app.post("/travel/budget/calculate")
-async def calculate_trip_budget(
-    budget_request: BudgetCalculationRequest,
-    user_id: str = Depends(get_current_user)
-):
-    """Calculate trip budget using the Travel MCP Tool."""
+async def _critique_itinerary(itinerary: Dict[str, Any], user_profile: Dict[str, Any]) -> Dict[str, Any]:
+    """Critique and improve itinerary using Critique Agent."""
     try:
-        # Execute budget calculation using the travel MCP tool
-        response = await tool_registry.execute_tool(
-            "travel_mcp_tool",
-            action="calculate_trip_budget",
-            destination=budget_request.destination,
-            days=budget_request.days,
-            travelers=budget_request.travelers,
-            budget_level=budget_request.budget_level
+        # Create message for critique
+        critique_message = AgentMessage(
+            agent_id="api",
+            message_type="critique_itinerary",
+            content={
+                "itinerary": itinerary,
+                "user_profile": user_profile
+            }
         )
+        
+        # Send to critique agent
+        response = await agent_registry.send_message("critique", critique_message)
         
         if response.success:
-            return APIResponse(
-                success=True,
-                data=response.data
-            )
+            critique_result = response.data.get("critique_result", {})
+            
+            # If critique suggests improvements, revise itinerary
+            if not critique_result.get("approved", False):
+                revised_itinerary = await _revise_itinerary(itinerary, critique_result)
+                return revised_itinerary if revised_itinerary else itinerary
+            
+            return itinerary
         else:
-            return APIResponse(
-                success=False,
-                error=response.error
-            )
+            logger.error(f"Critique failed: {response.error}")
+            return itinerary
+            
     except Exception as e:
-        logger.error(f"Error calculating trip budget: {str(e)}")
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Failed to calculate trip budget"
-        )
+        logger.error(f"Error critiquing itinerary: {str(e)}")
+        return itinerary
 
 
-# Background tasks for monitoring
-async def run_monitoring_cycle():
-    """Background task to run monitoring cycles."""
+async def _revise_itinerary(itinerary: Dict[str, Any], critique_result: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    """Revise itinerary based on critique feedback."""
     try:
-        message = AgentMessage(
-            agent_id="background",
-            message_type="run_monitoring_cycle",
-            content={}
+        # Create revision message
+        revision_message = AgentMessage(
+            agent_id="api",
+            message_type="revise_itinerary",
+            content={
+                "itinerary": itinerary,
+                "critique_feedback": critique_result.get("feedback", ""),
+                "issues": critique_result.get("issues", [])
+            }
         )
         
-        await agent_registry.send_message("monitor", message)
+        # Send to itinerary agent for revision
+        response = await agent_registry.send_message("itinerary", revision_message)
         
+        if response.success:
+            return response.data.get("revised_itinerary")
+        else:
+            logger.error(f"Itinerary revision failed: {response.error}")
+            return None
+            
     except Exception as e:
-        logger.error(f"Error in monitoring cycle: {str(e)}")
+        logger.error(f"Error revising itinerary: {str(e)}")
+        return None
 
 
-@app.post("/admin/monitoring/run-cycle")
-async def trigger_monitoring_cycle(background_tasks: BackgroundTasks):
-    """Manually trigger a monitoring cycle (admin endpoint)."""
+async def _store_trip_details(trip_details: Dict[str, Any]) -> str:
+    """Store trip details in database."""
     try:
-        background_tasks.add_task(run_monitoring_cycle)
+        # Generate trip ID
+        trip_id = f"trip_{USER_ID}_{int(datetime.utcnow().timestamp())}"
+        trip_details["trip_id"] = trip_id
         
-        return APIResponse(
-            success=True,
-            data={"message": "Monitoring cycle triggered"}
-        )
+        # Store in database
+        success = await db_manager.save_trip_details(trip_details)
         
+        if success:
+            logger.info(f"Trip details stored successfully: {trip_id}")
+            return trip_id
+        else:
+            logger.error("Failed to store trip details in database")
+            return trip_id  # Return ID even if storage failed
+            
     except Exception as e:
-        logger.error(f"Error triggering monitoring cycle: {str(e)}")
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Failed to trigger monitoring cycle"
-        )
+        logger.error(f"Error storing trip details: {str(e)}")
+        # Return a generated ID even if storage fails
+        return f"trip_{USER_ID}_{int(datetime.utcnow().timestamp())}"
+
+
+def _generate_response_message(trip_details: Dict[str, Any]) -> str:
+    """Generate user-friendly response message."""
+    destination = trip_details.get("destination", "your destination")
+    duration = trip_details.get("duration_days", 0)
+    
+    base_message = f"Great! I've planned your {duration}-day trip to {destination}. "
+    
+    itinerary = trip_details.get("itinerary", {})
+    if itinerary:
+        base_message += "Here's what I've arranged for you:\n\n"
+        
+        # Add highlights from itinerary
+        days = itinerary.get("days", [])
+        if days:
+            base_message += f"Day 1: {days[0].get('theme', 'Exploring the city')}\n"
+            if len(days) > 1:
+                base_message += f"Day 2: {days[1].get('theme', 'Cultural experiences')}\n"
+            if len(days) > 2:
+                base_message += "... and more exciting activities!\n"
+        
+        base_message += "\nYour trip is ready! Would you like me to make any adjustments?"
+    else:
+        base_message += "I'm working on the detailed itinerary. Would you like me to continue?"
+    
+    return base_message
 
 
 if __name__ == "__main__":

@@ -2,7 +2,6 @@
 google-generativeai>=0.3.0
 google-cloud-firestore>=2.11.0
 google-cloud-logging>=3.8.0
-redis>=5.0.0
 fastapi>=0.104.0
 uvicorn>=0.24.0
 pydantic>=2.5.0
@@ -26,20 +25,13 @@ python-booking>=1.0.0
 duffel-api>=1.0.0
 exchangerate-api>=1.0.0
 
-# Database and caching
+# Database
 firebase-admin>=6.2.0
-redis-py>=5.0.0
 sqlalchemy>=2.0.0
 
 # MongoDB (on-premise alternative to Firestore)
 pymongo>=4.6.0
 motor>=3.3.0
-
-# Authentication and security
-python-jose>=3.3.0
-passlib>=1.7.4
-python-multipart>=0.0.6
-bcrypt>=4.0.0
 
 # Utilities and validation
 python-dateutil>=2.8.0
