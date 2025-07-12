@@ -1,16 +1,16 @@
 # AI Travel Planner - Backend
 
-A complete agentic AI travel planning system that creates personalized, dynamic travel itineraries using **Google Gemini API**, **MCP tools**, and modern backend architecture.
+A complete agentic AI travel planning system that creates personalized, dynamic travel itineraries using **Google Gemini API**, and a modern backend architecture.
 
 ## 🚀 Overview
 
 AI Travel Planner is not just another trip generator - it's an **autonomous AI system** that plans, monitors, and adapts your travel experience in real-time. Built with a multi-agent architecture, it provides:
 
 - **Conversational Trip Planning**: Natural language interaction for planning
-- **Day-by-Day Confirmation**: User stays in control with step-by-step approval
-- **Real-time Monitoring**: Proactive disruption detection and replanning
+- **Day-by-Day Itinerary Generation**: Detailed daily plans.
+- **Real-time Monitoring**: Proactive disruption detection and replanning (future capability)
 - **Personalized Recommendations**: Deep user profiling for tailored experiences
-- **Dynamic Adaptation**: Automatic replanning when things go wrong
+- **Dynamic Adaptation**: Automatic replanning when things go wrong (future capability)
 
 ## ✨ Key Features
 
@@ -19,24 +19,21 @@ AI Travel Planner is not just another trip generator - it's an **autonomous AI s
 - **Profiler Agent**: Conducts conversational user onboarding and profiling
 - **Itinerary Agent**: Generates detailed daily itineraries using real-time data
 - **Critique Agent**: Quality assurance and itinerary validation
-- **Monitor Agent**: Real-time trip monitoring for disruptions
+- **Monitor Agent**: Real-time trip monitoring for disruptions (future capability)
 
 ### 🧠 **AI-Powered Planning**
 - **Google Gemini 1.5 Pro**: Advanced reasoning and planning capabilities
-- **Contextual Memory**: Learns and remembers user preferences
+- **Contextual Memory**: Learns and remembers user preferences via the database.
 - **Quality Assurance**: Built-in critique and revision loops
 - **Natural Language**: Conversational interaction throughout
 
-### 🛠️ **MCP Tool Integration**
+### 🛠️ **Tool Integration**
 - **Google Maps**: Location search, travel times, route optimization
-- **Weather Services**: Current conditions, forecasts, alerts
-- **Travel APIs**: Flights, accommodation, currency conversion
-- **Extensible Architecture**: Easy to add new tools and services
+- **Weather Services**: Current conditions and forecasts.
+- **TripAdvisor**: Rich content for locations, including reviews and photos.
 
 ### 🗄️ **Robust Data Layer**
-- **Firestore**: Persistent storage for user profiles and trip data
-- **Redis**: Session management, caching, and agent memory
-- **Multi-scope Memory**: Session, user, and application-level persistence
+- **MongoDB**: A flexible, scalable NoSQL database for storing user profiles, trip data, and agent memory.
 
 ## 🏗️ Architecture
 
@@ -70,10 +67,10 @@ AI Travel Planner is not just another trip generator - it's an **autonomous AI s
                   │
 ┌─────────────────▼───────────────────────┐
 │              Data Layer                 │
-│  ┌─────────────┐    ┌─────────────┐    │
-│  │  Firestore  │    │    Redis    │    │
-│  │(Persistent) │    │ (Sessions)  │    │
-│  └─────────────┘    └─────────────┘    │
+│         ┌───────────────────┐           │
+│         │     MongoDB       │           │
+│         │ (Persistent Data) │           │
+│         └───────────────────┘           │
 └─────────────────────────────────────────┘
 ```
 
@@ -81,9 +78,7 @@ AI Travel Planner is not just another trip generator - it's an **autonomous AI s
 
 ### Prerequisites
 - Python 3.8+
-- Redis server
-- Google Cloud account (for Firestore)
-- API keys for external services
+- Docker and Docker Compose
 
 ### 1. Clone & Install Dependencies
 
@@ -118,8 +113,17 @@ GEMINI_API_KEY=your-gemini-api-key
 # Location Services (Google Maps Platform)
 GOOGLE_MAPS_API_KEY=your-google-maps-api-key
 
-# Database
-FIRESTORE_PROJECT_ID=your-google-cloud-project-id
+# Database (MongoDB)
+# Option 1: Full URI (takes precedence)
+MONGODB_URI=mongodb://admin:password123@localhost:27017/travel_planner?authSource=admin
+
+# Option 2: Individual components (if URI is not set)
+MONGODB_HOST=localhost
+MONGODB_PORT=27017
+MONGODB_USERNAME=admin
+MONGODB_PASSWORD=password123
+MONGODB_DATABASE=travel_planner
+MONGODB_AUTH_DATABASE=admin
 ```
 
 **Optional (Recommended):**
@@ -129,86 +133,44 @@ OPENWEATHER_API_KEY=your-openweather-api-key
 
 # TripAdvisor Content API
 TRIPADVISOR_API_KEY=your-tripadvisor-api-key
-
-# External APIs for enhanced functionality
-AMADEUS_API_KEY=your-amadeus-api-key
-AMADEUS_API_SECRET=your-amadeus-api-secret
-
-# Redis (if not using localhost)
-REDIS_HOST=localhost
-REDIS_PORT=6379
-REDIS_PASSWORD=your-redis-password
 ```
 
-### 4. Google Maps Platform Setup
+### 4. Database Setup with Docker
 
-**Enable Required APIs:**
-1. Go to [Google Cloud Console](https://console.cloud.google.com/)
-2. Create a new project or select existing project
-3. Enable the following APIs:
-   - **Required**: Maps JavaScript API, Places API, Geocoding API, Directions API, Distance Matrix API, Elevation API, Time Zone API, Static Maps API, Street View API
-   - **Optional**: Address Validation API, Air Quality API, Pollen API, Solar API
-4. Create an API key with appropriate restrictions
-5. Set `GOOGLE_MAPS_API_KEY` in your `.env`
+This project uses MongoDB as its database. The easiest way to get started is with Docker Compose.
 
-### 5. TripAdvisor Content API Setup
-
-**Get TripAdvisor API Access:**
-1. Visit [TripAdvisor Developer Portal](https://developer-tripadvisor.com/)
-2. Sign up for a developer account
-3. Create a new application
-4. Get your API key from the dashboard
-5. Set `TRIPADVISOR_API_KEY` in your `.env`
-
-**Features Available:**
-- 7.5+ million locations worldwide
-- 1+ billion reviews and opinions
-- Up to 5 photos per location
-- Up to 5 reviews per location
-- 29 language support
-- Pay-as-you-go model (first 5000 calls free per month)
-
-### 6. Database Setup
-
-**Firestore:**
-1. Create a Google Cloud project (can be the same as Maps Platform)
-2. Enable Firestore API
-3. Download service account credentials (optional for local dev)
-4. Set `FIRESTORE_PROJECT_ID` in your `.env`
-
-**Redis:**
 ```bash
-# Install Redis (Ubuntu/Debian)
-sudo apt install redis-server
-
-# Start Redis
-sudo systemctl start redis-server
-
-# Verify Redis is running
-redis-cli ping
+# Start MongoDB and Mongo Express UI
+docker-compose up -d
 ```
 
-### 6. Test the Setup
+This command will:
+- Start a MongoDB container named `travel-planner-mongodb` on port `27017`.
+- Start a Mongo Express container named `travel-planner-mongo-ui` on port `8081`.
+- Create a persistent volume to store your database data.
+- Connect both containers to a shared network.
+
+You can access the Mongo Express web UI at `http://localhost:8081` to view and manage your database.
+
+### 5. Integration Tests
+
+Before running the main application, you can verify that your external API connections are configured correctly. Test files are located in the `tool_tests/` directory.
 
 ```bash
 # Test Gemini API integration
-python test_gemini_integration.py
+python tool_tests/test_gemini_integration.py
 
 # Test Google Maps Platform integration
-python test_google_maps_integration.py
+python tool_tests/test_google_maps_integration.py
 
 # Test OpenWeatherMap integration
-python test_openweather_integration.py
+python tool_tests/test_openweather_integration.py
 
 # Test TripAdvisor Content API integration
-python test_tripadvisor_integration.py
-
-# Should show:
-# ✅ All integration tests passed!
-# 🎯 Your AI Travel Planner is ready to use comprehensive APIs!
+python tool_tests/test_tripadvisor_integration.py
 ```
 
-### 7. Run the Server
+### 6. Run the Server
 
 ```bash
 # Development mode
@@ -223,24 +185,6 @@ python run_server.py --port 8080
 
 ## 🧪 Testing
 
-### Integration Tests
-```bash
-# Test Gemini API integration
-python test_gemini_integration.py
-
-# Test OpenWeatherMap integration
-python test_openweather_integration.py
-
-# Test Google Maps Platform integration
-python test_google_maps_integration.py
-
-# Test TripAdvisor Content API integration
-python test_tripadvisor_integration.py
-
-# Test MCP tools integration
-python test_travel_mcp_integration.py
-```
-
 ### API Testing
 ```bash
 # Server health check
@@ -252,30 +196,19 @@ open http://localhost:8000/docs
 
 ## 📚 API Documentation
 
+The primary interaction with the service is through the `/chat` endpoint.
+
 ### Core Endpoints
 
 **Health & Status:**
-- `GET /health` - System health check
-- `GET /status` - Detailed system status
-
-**User Management:**
-- `POST /users/profile` - Create/update user profile
-- `GET /users/profile` - Get user profile
-- `POST /users/onboarding` - Start user onboarding
+- `GET /health` - System health check.
+- `GET /` - Basic API information.
 
 **Trip Planning:**
-- `POST /trips/create` - Start new trip planning
-- `POST /trips/{trip_id}/continue` - Continue planning process
-- `POST /trips/{trip_id}/confirm-day` - Confirm daily itinerary
-- `POST /trips/{trip_id}/revise` - Request itinerary revision
-
-**Trip Monitoring:**
-- `POST /trips/{trip_id}/start-monitoring` - Start real-time monitoring
-- `GET /trips/{trip_id}/status` - Get trip status
-- `POST /trips/{trip_id}/handle-disruption` - Handle disruptions
+- `POST /chat` - Main endpoint for all conversational trip planning. Send user messages here to create and manage travel plans.
 
 ### Interactive API Documentation
-Visit `http://localhost:8000/docs` when the server is running for full interactive API documentation.
+Visit `http://localhost:8000/docs` when the server is running for full interactive API documentation and to try out the endpoints.
 
 ## 🔧 Configuration
 
@@ -294,12 +227,6 @@ MAX_TRIP_DAYS=30                # Maximum trip duration
 MAX_ACTIVITIES_PER_DAY=8        # Activities per day limit
 ```
 
-### Security Settings
-```bash
-SECRET_KEY=your-super-secret-key         # JWT secret
-ACCESS_TOKEN_EXPIRE_MINUTES=30          # Token expiration
-```
-
 ## 🚀 Development
 
 ### Project Structure
@@ -307,66 +234,46 @@ ACCESS_TOKEN_EXPIRE_MINUTES=30          # Token expiration
 travel-plan-be/
 ├── src/
 │   ├── agents/                 # Multi-agent system
-│   │   ├── base_agent.py      # Base agent class
+│   │   ├── base_agent.py
 │   │   ├── orchestrator_agent.py
 │   │   ├── profiler_agent.py
 │   │   ├── itinerary_agent.py
 │   │   ├── critique_agent.py
 │   │   └── monitor_agent.py
-│   ├── api/                   # FastAPI application
+│   ├── api/                    # FastAPI application
 │   │   └── main.py
-│   ├── config/                # Configuration
+│   ├── config/                 # Configuration
 │   │   └── settings.py
-│   ├── database/              # Database layer
-│   │   ├── firestore_client.py
-│   │   ├── redis_client.py
-│   │   └── __init__.py
-│   ├── models/                # Data models
+│   ├── database/               # Database layer
+│   │   └── mongodb_client.py
+│   ├── models/                 # Data models (Pydantic)
 │   │   ├── user.py
-│   │   ├── trip.py
-│   │   └── __init__.py
-│   ├── tools/                 # MCP tools
+│   │   └── trip.py
+│   ├── tools/                  # Tools for agents
 │   │   ├── base_mcp_tool.py
 │   │   ├── google_maps_tool.py
 │   │   ├── weather_tool.py
-│   │   └── travel_mcp_tool.py
-│   └── utils/                 # Utilities
-│       ├── gemini_client.py
-│       └── __init__.py
-├── requirements.txt           # Dependencies
-├── run_server.py             # Server runner
-├── test_gemini_integration.py # Integration tests
-└── .env.template             # Environment template
+│   │   └── tripadvisor_tool.py
+│   └── utils/                  # Utilities
+│       └── gemini_client.py
+├── tool_tests/                 # Integration tests for tools
+├── requirements.txt            # Dependencies
+├── run_server.py               # Server runner
+├── docker-compose.yml          # Docker setup for MongoDB
+└── .env.template               # Environment template
 ```
 
 ### Adding New Agents
 1. Create new agent class inheriting from `BaseAgent`
 2. Implement `execute()` and `get_prompt_template()` methods
-3. Register in `AgentRegistry`
+3. Register in `agent_registry`
 4. Add to orchestrator workflow
 
-### Adding New MCP Tools
+### Adding New Tools
 1. Create tool class inheriting from `BaseMCPTool`
 2. Implement `execute()` and `get_schema()` methods
 3. Register in `tool_registry`
 4. Add to agent tool lists
-
-## 🔍 Monitoring & Observability
-
-### Logging
-- Structured logging with configurable levels
-- Agent-specific log namespaces
-- File and console output
-
-### Performance Metrics
-- Agent execution times and success rates
-- Tool usage statistics
-- Memory and state tracking
-
-### Health Checks
-- Database connection monitoring
-- Agent status tracking
-- External API availability
 
 ## 🌍 Production Deployment
 
@@ -379,17 +286,18 @@ HOST=0.0.0.0
 PORT=8000
 
 # Strong security settings
-SECRET_KEY=generate-strong-random-key
-REDIS_PASSWORD=secure-redis-password
+MONGODB_URI=your-production-mongodb-uri
 ```
 
 ### Docker Deployment (Optional)
+A `Dockerfile` can be created for containerizing the main application.
 ```dockerfile
 FROM python:3.11-slim
 
 WORKDIR /app
 COPY requirements.txt .
-RUN pip install -r requirements.txt
+# Use uv for faster installation
+RUN pip install uv && uv pip install -r requirements.txt --no-cache-dir
 
 COPY src/ src/
 COPY run_server.py .
@@ -399,22 +307,10 @@ CMD ["python", "run_server.py"]
 ```
 
 ### Scaling Considerations
-- Use production WSGI server (Gunicorn + Uvicorn)
-- Redis clustering for session management
-- Load balancer for multiple instances
-- Monitoring and alerting setup
-
-## 📊 Performance & Costs
-
-### Gemini API Usage
-- **Model**: Gemini 1.5 Pro
-- **Cost**: Pay-per-token pricing
-- **Optimization**: Smart caching and context management
-
-### Expected Performance
-- **Response Time**: < 2s for simple requests
-- **Planning Time**: 30-60s for full day planning
-- **Concurrent Users**: 100+ with proper scaling
+- Use a production WSGI server (Gunicorn + Uvicorn).
+- Use a managed MongoDB service (like MongoDB Atlas) for scalability and reliability.
+- Use a load balancer for multiple application instances.
+- Set up robust monitoring and alerting.
 
 ## 🤝 Contributing
 
@@ -424,34 +320,6 @@ CMD ["python", "run_server.py"]
 4. Add tests for new functionality
 5. Submit a pull request
 
-## 📄 License
-
-[Add your license information here]
-
-## 🆘 Support
-
-### Common Issues
-
-**Gemini API Errors:**
-- Check your API key is valid
-- Verify you have sufficient quota
-- Review rate limiting
-
-**Database Connection Issues:**
-- Verify Firestore project ID
-- Check Redis server is running
-- Review network connectivity
-
-**Tool Integration Problems:**
-- Validate API keys for external services
-- Check MCP tool configurations
-- Review tool permissions
-
-### Getting Help
-- Check the [troubleshooting guide](docs/troubleshooting.md)
-- Review API documentation at `/docs`
-- Run integration tests to verify setup
-
 ---
 
-**Built with ❤️ using Google Gemini API, FastAPI, and the Model Context Protocol (MCP)**
+**Built with ❤️ using Google Gemini API, FastAPI, and MongoDB.**
