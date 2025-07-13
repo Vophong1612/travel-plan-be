@@ -143,15 +143,17 @@ class ItineraryAgent(BaseAgent):
         try:
             # Parse revision request
             request = await self._parse_itinerary_request(content)
-            existing_itinerary = content.get("existing_itinerary")
+            existing_itinerary_data = content.get("existing_itinerary")
             
-            if not existing_itinerary:
+            if not existing_itinerary_data:
                 return self._create_error_response("existing_itinerary is required for revision")
+
+            existing_itinerary = ItineraryDay(**existing_itinerary_data)
             
             # Analyze feedback
             feedback_analysis = await self._analyze_revision_feedback(
                 request.revision_feedback, 
-                existing_itinerary
+                existing_itinerary.dict()
             )
             
             # Apply revisions
@@ -164,7 +166,7 @@ class ItineraryAgent(BaseAgent):
             return self._create_success_response({
                 "revised_itinerary": revised_itinerary.dict(),
                 "revision_summary": feedback_analysis,
-                "changes_made": await self._get_revision_changes(existing_itinerary, revised_itinerary)
+                "changes_made": await self._get_revision_changes(existing_itinerary.dict(), revised_itinerary)
             })
             
         except Exception as e:
@@ -606,70 +608,82 @@ class ItineraryAgent(BaseAgent):
             return "City Discovery"
     
     async def _analyze_revision_feedback(self, feedback: str, existing_itinerary: Dict[str, Any]) -> Dict[str, Any]:
-        """Analyze revision feedback and determine what changes to make."""
-        # Simple feedback analysis (could be enhanced with NLP)
+        """Analyze user feedback for revision using AI."""
+        self.logger.info(f"Analyzing revision feedback: '{feedback}'")
+        
+        # Simple keyword-based analysis for demo purposes
+        # A more robust solution would use AI to understand intent
+        analysis = {"intent": "modify", "details": {}}
         feedback_lower = feedback.lower()
-        
-        analysis = {
-            "feedback": feedback,
-            "changes_requested": []
-        }
-        
-        # Common feedback patterns
-        if "restaurant" in feedback_lower or "food" in feedback_lower or "dining" in feedback_lower:
-            analysis["changes_requested"].append("change_dining")
-        
-        if "outdoor" in feedback_lower or "indoor" in feedback_lower:
-            analysis["changes_requested"].append("change_activity_type")
-        
-        if "time" in feedback_lower or "schedule" in feedback_lower:
-            analysis["changes_requested"].append("adjust_timing")
-        
-        if "expensive" in feedback_lower or "cheap" in feedback_lower or "budget" in feedback_lower:
-            analysis["changes_requested"].append("adjust_budget")
-        
-        if "more" in feedback_lower or "add" in feedback_lower:
-            analysis["changes_requested"].append("add_activities")
-        
-        if "less" in feedback_lower or "remove" in feedback_lower:
-            analysis["changes_requested"].append("remove_activities")
+
+        if "add" in feedback_lower or "visit" in feedback_lower or "go to" in feedback_lower:
+            analysis["intent"] = "add_activity"
+            # Extract the name of the place to add
+            # This is a very basic extraction
+            try:
+                if "add" in feedback_lower:
+                    activity_name = feedback.split("add")[1].strip()
+                elif "visit" in feedback_lower:
+                    activity_name = feedback.split("visit")[1].strip()
+                elif "go to" in feedback_lower:
+                    activity_name = feedback.split("go to")[1].strip()
+                else:
+                    activity_name = feedback_lower
+                
+                analysis["details"]["name"] = activity_name.strip()
+            except IndexError:
+                analysis["details"]["name"] = "unspecified"
+
+        elif "remove" in feedback_lower or "don't want" in feedback_lower:
+            analysis["intent"] = "remove_activity"
+            # Extract activity to remove
+            try:
+                activity_name = feedback.split("remove")[1].strip()
+                analysis["details"]["name"] = activity_name
+            except IndexError:
+                 analysis["details"]["name"] = "unspecified"
         
         return analysis
-    
-    async def _apply_revisions(self, existing_itinerary: Dict[str, Any], feedback_analysis: Dict[str, Any], request: ItineraryRequest) -> ItineraryDay:
-        """Apply revisions to an existing itinerary."""
-        # For now, regenerate the itinerary with feedback constraints
-        # In a more sophisticated version, we would make targeted changes
-        
-        # Add feedback as constraints
-        constraints = request.constraints or {}
-        constraints["revision_feedback"] = feedback_analysis
-        
-        # Create new request with constraints
-        revision_request = ItineraryRequest(
-            user_profile=request.user_profile,
-            destination=request.destination,
-            date=request.date,
-            day_index=request.day_index,
-            constraints=constraints
-        )
-        
-        # Generate new itinerary
-        weather_info = await self._get_weather_for_date(request.destination, request.date)
-        location_info = await self._get_location_info(request.destination)
-        
-        activity_suggestions = await self._generate_activity_suggestions(
-            request.user_profile,
-            request.destination,
-            request.date,
-            weather_info,
-            location_info
-        )
-        
-        return await self._create_optimized_itinerary(revision_request, activity_suggestions, weather_info)
-    
+
+    async def _apply_revisions(self, existing_itinerary: ItineraryDay, feedback_analysis: Dict[str, Any], request: ItineraryRequest) -> ItineraryDay:
+        """Apply revisions to an itinerary based on feedback analysis."""
+        self.logger.info(f"Applying revisions with intent: {feedback_analysis.get('intent')}")
+
+        revised_itinerary = existing_itinerary.copy(deep=True)
+
+        if feedback_analysis.get("intent") == "add_activity":
+            activity_name_to_add = feedback_analysis.get("details", {}).get("name")
+            if activity_name_to_add and activity_name_to_add != "unspecified":
+                # Find the location for the new activity
+                location_suggestions = await self._find_activities_by_type(
+                    request.destination,
+                    ActivityType.SIGHTSEEING, # Assume sightseeing for simplicity
+                    {"query": activity_name_to_add}
+                )
+
+                if location_suggestions:
+                    new_activity_data = location_suggestions[0] # Take the first suggestion
+                    
+                    # Create a new activity object
+                    new_activity = Activity(
+                        id=f"activity_{int(datetime.utcnow().timestamp())}",
+                        name=new_activity_data.get("name", activity_name_to_add),
+                        type=ActivityType.SIGHTSEEING,
+                        description=new_activity_data.get("description"),
+                        location=Location(**new_activity_data.get("location")),
+                        duration_minutes=self._estimate_activity_duration("sightseeing")
+                    )
+
+                    # Add the new activity to the start of the day for simplicity
+                    revised_itinerary.activities.insert(0, new_activity)
+                    self.logger.info(f"Added new activity: {new_activity.name}")
+
+        # In a real application, you would handle other intents like "remove", "reorder", etc.
+        # For the demo, we just return the modified itinerary
+        return revised_itinerary
+
     async def _get_revision_changes(self, old_itinerary: Dict[str, Any], new_itinerary: ItineraryDay) -> List[str]:
-        """Get a list of changes made during revision."""
+        """Compare old and new itineraries to list changes."""
         changes = []
         
         old_activities = old_itinerary.get("activities", [])

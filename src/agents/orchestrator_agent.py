@@ -808,16 +808,26 @@ class OrchestratorAgent(BaseAgent):
     async def _parse_trip_from_message(self, message: str) -> Optional[Dict[str, Any]]:
         """Parse trip information from user message using AI."""
         try:
+            # Get current date for time-based references
+            from datetime import datetime, date
+            current_date = date.today()
+            current_datetime = datetime.now()
+            current_day_of_week = current_datetime.strftime('%A')
+            
             # Use AI to extract trip information from the message
             extraction_prompt = f"""
             Extract trip information from this user message: "{message}"
+            
+            Today's date is {current_date.isoformat()}, day of the week is {current_day_of_week}, and the current time is {current_datetime.strftime('%H:%M:%S')}.
+            Please use this information when interpreting relative time references like "next week", "next month", etc.
             
             Please identify and extract the following information:
             1. Destination (city/place name) - any location mentioned
             2. Duration (number of days) - look for patterns like "3-day", "5 days", "week", etc.
             3. Any specific dates mentioned
-            4. Travel preferences (food, activities, budget level)
+            4. Travel preferences (food, activities,...)
             5. Number of travelers
+            6. Any other relevant information
             
             If specific dates are not mentioned, assume the trip starts 30 days from today.
             If duration is not specified, assume 5 days.
@@ -867,7 +877,23 @@ class OrchestratorAgent(BaseAgent):
                         "type": "string",
                         "enum": ["budget", "mid-range", "luxury"],
                         "description": "Budget level if mentioned"
+                    },
+                    "accommodation_preferences": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": "List of accommodation preferences mentioned"
+                    },
+                    "transportation_preferences": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": "List of transportation preferences mentioned"
+                    },
+                    "other_preferences": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": "List of other preferences mentioned"
                     }
+
                 },
                 "required": ["destination", "duration_days", "start_date", "end_date"]
             }
@@ -896,7 +922,10 @@ class OrchestratorAgent(BaseAgent):
                 "food_preferences": extraction_result.get("food_preferences", []),
                 "activities": extraction_result.get("activities", []),
                 "travelers": extraction_result.get("travelers", 1),
-                "budget_level": extraction_result.get("budget_level", "mid-range")
+                "budget_level": extraction_result.get("budget_level", "mid-range"),
+                "accommodation_preferences": extraction_result.get("accommodation_preferences", []),
+                "transportation_preferences": extraction_result.get("transportation_preferences", []),
+                "other_preferences": extraction_result.get("other_preferences", [])
             }
             
         except Exception as e:

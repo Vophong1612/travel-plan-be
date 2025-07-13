@@ -21,6 +21,10 @@ logging.basicConfig(
 logger = logging.getLogger("api_main")
 
 
+# Global variable to store the latest trip plan for the demo
+latest_trips_plan: Optional[Dict[str, Any]] = None
+
+
 # Hardcoded user ID
 USER_ID = "1"
 
@@ -141,21 +145,37 @@ async def chat_with_planner(chat_request: ChatRequest):
     4. Store trip details in database
     5. Return response
     """
+    global latest_trips_plan
     logger.info(f"CHAT API: Processing request for user {USER_ID} - '{chat_request.message[:50]}...'")
     
     try:
+        # If there's a previous plan, the message is for revision.
+        is_revision = latest_trips_plan is not None
+
         # Step 1: Call Main AI to classify and extract information
         extracted_info = await _extract_trip_information(chat_request.message)
         
-        if not extracted_info:
+        # For brand new trip planning, we need complete information
+        if not is_revision and not extracted_info:
             return ChatResponse(
                 success=False,
                 message="I couldn't understand your trip request. Please provide more details about where you want to go and when.",
                 error="No trip information extracted"
             )
+            
+        # For revisions, we can work with minimal or no extracted info
+        if is_revision and not extracted_info:
+            # Create minimal extracted info for revision
+            extracted_info = {
+                "user_message": chat_request.message
+            }
         
         # Step 2: Call appropriate AI agents based on extracted information
-        trip_details = await _coordinate_ai_agents(extracted_info)
+        trip_details = await _coordinate_ai_agents(
+            extracted_info, 
+            previous_plan=latest_trips_plan, 
+            user_message=chat_request.message
+        )
         
         if not trip_details:
             return ChatResponse(
@@ -163,6 +183,9 @@ async def chat_with_planner(chat_request: ChatRequest):
                 message="I encountered an error while planning your trip. Please try again.",
                 error="Failed to generate trip details"
             )
+        
+        # Update the latest plan for the demo
+        latest_trips_plan = trip_details
         
         # Step 3: Store trip details in database
         trip_id = await _store_trip_details(trip_details)
@@ -257,7 +280,38 @@ def _simple_extraction_fallback(message: str) -> Optional[Dict[str, Any]]:
             found_destination = dest.title()
             break
     
+    # Check for specific attractions/places
+    attractions = {
+        "times square": "New York",
+        "eiffel tower": "Paris",
+        "louvre": "Paris",
+        "central park": "New York",
+        "big ben": "London",
+        "colosseum": "Rome",
+        "sagrada familia": "Barcelona",
+        "tokyo tower": "Tokyo",
+        "brandenburg gate": "Berlin"
+    }
+    
+    found_attraction = None
+    for attraction, city in attractions.items():
+        if attraction in message_lower:
+            found_attraction = attraction.title()
+            if not found_destination:
+                found_destination = city
+            break
+    
     if not found_destination:
+        # For revision requests, we can return None as the previous plan will be used
+        if "add" in message_lower or "visit" in message_lower or "include" in message_lower:
+            # This is likely a revision request, return minimal info
+            return {
+                "destination": "Current Destination",  # Will be overridden by previous plan
+                "start_date": datetime.now().date().isoformat(),
+                "end_date": (datetime.now().date() + timedelta(days=1)).isoformat(),
+                "duration_days": 1,
+                "activities": [found_attraction] if found_attraction else []
+            }
         return None
     
     # Extract duration
@@ -285,6 +339,10 @@ def _simple_extraction_fallback(message: str) -> Optional[Dict[str, Any]]:
         if activity in message_lower:
             activities.append(activity)
     
+    # Add found attraction to activities if any
+    if found_attraction and found_attraction not in activities:
+        activities.append(found_attraction)
+    
     # Calculate dates (30 days from now)
     start_date = datetime.now().date() + timedelta(days=30)
     end_date = start_date + timedelta(days=duration_days - 1)
@@ -301,30 +359,55 @@ def _simple_extraction_fallback(message: str) -> Optional[Dict[str, Any]]:
     }
 
 
-async def _coordinate_ai_agents(extracted_info: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+async def _coordinate_ai_agents(extracted_info: Dict[str, Any], previous_plan: Optional[Dict[str, Any]] = None, user_message: str = "") -> Optional[Dict[str, Any]]:
     """
-    Coordinate AI agents to generate trip details.
+    Coordinate AI agents to generate or update trip details.
     
     Agents used:
     - Profiler Agent: Create user profile if needed
-    - Itinerary Agent: Generate detailed itinerary for each day
+    - Itinerary Agent: Generate or revise detailed itinerary for each day
     - Critique Agent: Review and improve itinerary
     """
-    logger.info(f"COORDINATE AGENTS: Processing destination '{extracted_info.get('destination', 'unknown')}'")
+    logger.info(f"COORDINATE AGENTS: Processing destination '{extracted_info.get('destination') or (previous_plan or {}).get('destination', 'unknown')}'")
     
     try:
+        # If there is a previous plan, merge new info into it
+        if previous_plan:
+            if extracted_info:
+                # Naive update, a more sophisticated merge would be better in production
+                previous_plan.update(extracted_info)
+            current_info = previous_plan
+        else:
+            current_info = extracted_info
+
+        if not current_info or not current_info.get("destination"):
+            logger.error("COORDINATE AGENTS ERROR: Destination not found in current info.")
+            return None
+
         # Step 1: Check if user profile exists, create if needed
-        user_profile = await _ensure_user_profile(extracted_info)
+        user_profile = await _ensure_user_profile(current_info)
         
-        # Step 2: Generate itinerary for each day
-        duration_days = extracted_info["duration_days"]
+        # Step 2: Generate or revise itinerary for each day
+        duration_days = current_info.get("duration_days", 1)
         daily_itineraries = []
         
         for day_number in range(1, duration_days + 1):
             logger.info(f"COORDINATE AGENTS: Generating itinerary for day {day_number}/{duration_days}")
             
             # Generate itinerary for this specific day
-            day_itinerary = await _generate_daily_itinerary(extracted_info, user_profile, day_number)
+            # Safely check if previous plan has itinerary for this day
+            previous_day_itinerary = None
+            if previous_plan and previous_plan.get('itinerary') and isinstance(previous_plan.get('itinerary'), list):
+                if len(previous_plan.get('itinerary', [])) >= day_number:
+                    previous_day_itinerary = previous_plan['itinerary'][day_number-1]
+            
+            day_itinerary = await _generate_daily_itinerary(
+                current_info, 
+                user_profile, 
+                day_number,
+                previous_plan=previous_day_itinerary,
+                user_message=user_message
+            )
             
             if not day_itinerary:
                 logger.error(f"COORDINATE AGENTS ERROR: Failed to generate itinerary for day {day_number}")
@@ -337,15 +420,16 @@ async def _coordinate_ai_agents(extracted_info: Dict[str, Any]) -> Optional[Dict
         # Step 4: Compile trip details
         trip_details = {
             "user_id": USER_ID,
-            "destination": extracted_info["destination"],
-            "start_date": extracted_info["start_date"],
-            "end_date": extracted_info["end_date"],
-            "duration_days": extracted_info["duration_days"],
+            "destination": current_info["destination"],
+            "start_date": current_info["start_date"],
+            "end_date": current_info["end_date"],
+            "duration_days": duration_days,
             "user_profile": user_profile,
-            "itinerary": daily_itineraries,  # Now a list of daily itineraries
-            "extracted_preferences": extracted_info,
+            "itinerary": daily_itineraries,
+            "extracted_preferences": extracted_info, # Keep latest extracted info
             "status": "planned",
-            "created_at": datetime.utcnow().isoformat()
+            "created_at": (previous_plan or {}).get('created_at', datetime.utcnow().isoformat()),
+            "updated_at": datetime.utcnow().isoformat()
         }
         
         return trip_details
@@ -425,42 +509,72 @@ async def _ensure_user_profile(extracted_info: Dict[str, Any]) -> Dict[str, Any]
         }
 
 
-async def _generate_daily_itinerary(extracted_info: Dict[str, Any], user_profile: Dict[str, Any], day_number: int) -> Optional[Dict[str, Any]]:
-    """Generate itinerary for a specific day using Itinerary Agent."""
+async def _generate_daily_itinerary(extracted_info: Dict[str, Any], user_profile: Dict[str, Any], day_number: int, previous_plan: Optional[Dict[str, Any]] = None, user_message: str = "") -> Optional[Dict[str, Any]]:
+    """Generate or revise itinerary for a specific day using Itinerary Agent."""
     logger.info(f"GENERATE DAILY ITINERARY: Creating itinerary for day {day_number} in {extracted_info.get('destination', 'unknown')}")
     
     try:
         # Calculate the specific date for this day
-        start_date = _parse_date_safely(extracted_info["start_date"])
+        start_date = _parse_date_safely(extracted_info.get("start_date", datetime.now().date().isoformat()))
         day_date = start_date + timedelta(days=day_number - 1)
         
-        # Create message for itinerary generation
-        itinerary_message = AgentMessage(
-            agent_id="api",
-            message_type="generate_itinerary",
-            content={
+        # Check for specific attraction mentions in user message for revisions
+        attraction_mentioned = False
+        if user_message:
+            user_message_lower = user_message.lower()
+            attractions = ["times square", "eiffel tower", "louvre", "central park", "big ben", 
+                          "colosseum", "sagrada familia", "tokyo tower", "brandenburg gate"]
+            
+            for attraction in attractions:
+                if attraction in user_message_lower:
+                    attraction_mentioned = True
+                    break
+        
+        if previous_plan:
+            # Revise existing plan
+            message_type = "revise_itinerary"
+            content = {
+                "user_profile": user_profile,
+                "destination": extracted_info.get("destination", previous_plan.get("destination", "Unknown")),
+                "date": day_date.isoformat(),
+                "day_index": day_number,
+                "existing_itinerary": previous_plan,
+                "revision_feedback": user_message,
+                "constraints": extracted_info
+            }
+            
+            # If a specific attraction was mentioned, add it to the revision feedback
+            if attraction_mentioned:
+                content["revision_feedback"] = f"Add {user_message} to the itinerary"
+        else:
+            # Generate new plan
+            message_type = "generate_itinerary"
+            content = {
                 "user_profile": user_profile,
                 "destination": extracted_info["destination"],
                 "date": day_date.isoformat(),
                 "day_index": day_number,
-                "start_date": extracted_info["start_date"],
-                "end_date": extracted_info["end_date"],
-                "duration_days": extracted_info["duration_days"],
                 "preferences": extracted_info
             }
+
+        # Create message for itinerary generation/revision
+        itinerary_message = AgentMessage(
+            agent_id="api",
+            message_type=message_type,
+            content=content
         )
         
         # Send to itinerary agent
         response = await agent_registry.send_message("itinerary", itinerary_message)
         
         if response.success:
-            return response.data.get("itinerary")
+            return response.data.get("itinerary") or response.data.get("revised_itinerary")
         else:
-            logger.error(f"GENERATE DAILY ITINERARY ERROR: {response.error}")
+            logger.error(f"GENERATE/REVISE DAILY ITINERARY ERROR: {response.error}")
             return None
             
     except Exception as e:
-        logger.error(f"GENERATE DAILY ITINERARY ERROR: {str(e)}")
+        logger.error(f"GENERATE/REVISE DAILY ITINERARY ERROR: {str(e)}")
         return None
 
 
@@ -596,7 +710,7 @@ def _generate_response_message(trip_details: Dict[str, Any]) -> str:
     duration = trip_details.get("duration_days", 0)
     
     # Create comprehensive trip details table wrapped in scrollable div
-    message = f'<div style="overflow-x: auto;">\n\nGreat! I\'ve planned your {duration}-day trip to {destination}. Here\'s your complete travel plan:\n\n'
+    message = f'Great! I\'ve planned your {duration}-day trip to {destination}. Here\'s your complete travel plan:\n\n'
     
     # Trip Overview Table
     message += "## 🌍 Trip Overview\n\n"
@@ -616,7 +730,7 @@ def _generate_response_message(trip_details: Dict[str, Any]) -> str:
         
         for day_num, day_itinerary in enumerate(itinerary, 1):
             message += f"### Day {day_num}: {day_itinerary.get('theme', 'Exploring')}\n\n"
-            message += "| **Time** | **Activity** | **Location** | **Cost** |\n"
+            message += "<div style='overflow-x: auto;'>\n\n| **Time** | **Activity** | **Location** | **Cost** |\n"
             message += "|----------|-------------|-------------|----------|\n"
             
             activities = day_itinerary.get("activities", [])
@@ -649,7 +763,7 @@ def _generate_response_message(trip_details: Dict[str, Any]) -> str:
                     
                     message += f"| {time_str} | {name} | {location} | {cost} |\n"
         
-        message += "\n"
+                message += "\n\n</div>\n\n"
     
     # Budget Summary
     message += "## 💰 Budget Summary\n\n"
@@ -736,7 +850,6 @@ def _generate_response_message(trip_details: Dict[str, Any]) -> str:
     
     message += "\n---\n"
     message += "🎯 **Your trip is ready!** Would you like me to make any adjustments to your itinerary, budget, or preferences?"
-    message += "\n\n</div>"
     
     return message
 

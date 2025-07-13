@@ -633,7 +633,38 @@ class TripAdvisorTool(BaseMCPTool):
             "hours": location.get("hours", {}),
             "features": location.get("features", [])
         })
-        
+
+        # --- Begin: Category-specific details enhancement ---
+        category = details.get("category", {}).get("name")
+
+        if category == "restaurants":
+            details["restaurant_info"] = {
+                "price_level": details.get("price_level"),
+                "cuisine": details.get("cuisine", []),
+                "dietary_restrictions": details.get("dietary_restrictions", []),
+                # The following are speculative fields based on common restaurant data.
+                # The .get() method ensures no errors if they don't exist in the API response.
+                "reservations": location.get("reservations", {}),
+                "menu_url": location.get("menu_url")
+            }
+
+        if category == "attractions":
+            subcategories = [sub.get('name', '').lower() for sub in details.get("subcategory", [])]
+            attraction_type = [subcat.get('name') for subcat in details.get("subcategory", []) if subcat.get('name')]
+            
+            is_museum = "museums" in subcategories
+            is_landmark = "landmarks & points of interest" in subcategories or "historic sites" in subcategories
+
+            details["attraction_info"] = {
+                # Speculative fields based on common attraction data.
+                "suggested_duration": location.get("suggested_duration"),
+                "ticket_info": location.get("ticket_info"),
+                "attraction_type": attraction_type,
+                "is_museum": is_museum,
+                "is_landmark": is_landmark
+            }
+        # --- End: Category-specific details enhancement ---
+
         return details
     
     def _format_photo_result(self, photo: Dict[str, Any]) -> Dict[str, Any]:
