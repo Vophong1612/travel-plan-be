@@ -16,7 +16,7 @@ class Settings(BaseSettings):
     
     # Server
     host: str = Field(default="0.0.0.0", env="HOST")
-    port: int = Field(default=8000, env="PORT")
+    port: int = Field(default=8001, env="PORT")
     
     # Database Configuration
     # Option 1: Firestore (Google Cloud)

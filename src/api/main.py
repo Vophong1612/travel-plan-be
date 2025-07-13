@@ -12,6 +12,7 @@ from src.config.settings import settings
 from src.database import db_manager
 from src.agents import agent_registry
 from src.agents.base_agent import AgentMessage
+from src.utils.gemini_client import gemini_client
 
 # Configure logging
 logging.basicConfig(
@@ -23,6 +24,11 @@ logger = logging.getLogger("api_main")
 
 # Hardcoded user ID
 USER_ID = "1"
+
+
+# In-memory store for user context (for demo purposes)
+# In a real application, this should be in a database or a proper session manager.
+global_user_context = ""
 
 
 # Pydantic models for Chat API
@@ -142,10 +148,26 @@ async def chat_with_planner(chat_request: ChatRequest):
     5. Return response
     """
     logger.info(f"CHAT API: Processing request for user {USER_ID} - '{chat_request.message[:50]}...'")
+    global global_user_context
     
     try:
+        if global_user_context != "":
+            # call LLM to combine the new message with the user context and update the user context
+            logger.info("Combining new message with existing user context.")
+            prompt = f"Please combine the user's new message with the existing conversation context. The goal is to create a consolidated, updated context that reflects the latest information and nuances from the new message, while maintaining the key details from the prior context.  It should be a summary of the whole conversation state. Only return the updated user context itself, with no extra commentary or labels.\n\nNew Message: '{chat_request.message}'\n\nExisting Context: '{global_user_context}'"
+            
+            try:
+                updated_context = await gemini_client.generate_response(prompt)
+                global_user_context = updated_context
+                logger.info(f"Updated user context: {global_user_context}")
+            except Exception as e:
+                logger.error(f"Failed to update user context with Gemini: {e}")
+        else:
+            # If no context, the new message becomes the initial context
+             global_user_context = chat_request.message
+        
         # Step 1: Call Main AI to classify and extract information
-        extracted_info = await _extract_trip_information(chat_request.message)
+        extracted_info = await _extract_trip_information(global_user_context)
         
         if not extracted_info:
             return ChatResponse(
@@ -169,7 +191,7 @@ async def chat_with_planner(chat_request: ChatRequest):
         
         # Step 4: Return response
         response_message = _generate_response_message(trip_details)
-        
+        global_user_context = "User question: \n" + global_user_context + "\n\n" + "User context: \n" + response_message
         return ChatResponse(
             success=True,
             message=response_message,
@@ -368,7 +390,7 @@ async def _ensure_user_profile(extracted_info: Dict[str, Any]) -> Dict[str, Any]
         
         # Create new profile based on extracted info
         profile = {
-            "user_id": USER_ID,
+            "user_id": USER_ID, 
             "preferences": {
                 "travel_style": ["cultural"],  # Should be a list of TravelStyle enums
                 "pace": "moderate",
@@ -377,7 +399,7 @@ async def _ensure_user_profile(extracted_info: Dict[str, Any]) -> Dict[str, Any]
                 "accommodation_preferences": None,
                 "transport_preferences": None,
                 "activity_preferences": None
-            },
+            }, 
             "traveler_info": {
                 "group_size": int(extracted_info.get("travelers") or 1),
                 "travels_with": ["solo"] if int(extracted_info.get("travelers") or 1) == 1 else ["friends"],

@@ -808,9 +808,17 @@ class OrchestratorAgent(BaseAgent):
     async def _parse_trip_from_message(self, message: str) -> Optional[Dict[str, Any]]:
         """Parse trip information from user message using AI."""
         try:
+            # Get current date and time information
+            from datetime import datetime, timedelta
+            current_date = datetime.now().strftime("%Y-%m-%d")
+            current_day_of_week = datetime.now().strftime("%A")
+            current_time = datetime.now().strftime("%H:%M:%S")
+            
             # Use AI to extract trip information from the message
             extraction_prompt = f"""
             Extract trip information from this user message: "{message}"
+            
+            Today's date is {current_date} ({current_day_of_week}), current time is {current_time}.
             
             Please identify and extract the following information:
             1. Destination (city/place name) - any location mentioned
