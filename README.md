@@ -22,7 +22,7 @@ AI Travel Planner is not just another trip generator - it's an **autonomous AI s
 - **Monitor Agent**: Real-time trip monitoring for disruptions (future capability)
 
 ### 🧠 **AI-Powered Planning**
-- **Google Gemini 1.5 Pro**: Advanced reasoning and planning capabilities
+- **Google Gemini 2.5 Pro**: Advanced reasoning and planning capabilities
 - **Contextual Memory**: Learns and remembers user preferences via the database.
 - **Quality Assurance**: Built-in critique and revision loops
 - **Natural Language**: Conversational interaction throughout
@@ -77,7 +77,7 @@ AI Travel Planner is not just another trip generator - it's an **autonomous AI s
 ## 🛠️ Setup & Installation
 
 ### Prerequisites
-- Python 3.8+
+- Python 3.10+
 - Docker and Docker Compose
 
 ### 1. Clone & Install Dependencies
